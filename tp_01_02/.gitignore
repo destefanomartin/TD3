@@ -1,8 +1,6 @@
-
-a.out
-
-first_test.bin
-
-first_test.elf
-
-startup.o
+*.elf
+*.o
+*.txt
+*.lst
+*.bin
+*.map
