@@ -9,10 +9,8 @@ tp03.bin: tp03.elf
 
 
 tp03.elf: tp03.o move_function.o
-	mkdir -p obj
-	mkdir -p lst
 	$(CHAIN)-ld -g -T td3_memmap.ld *.o -o tp03.elf -Map $(LST)tp03.map
-	$(CHAIN)-objdump -D tp03.elf > $(LST)tp03.lst
+	$(CHAIN)-objdump -D tp03.elf > tp03.lst
 
 tp03.o: tp03.s
 	$(CHAIN)-as tp03.s -g -o tp03.o -a > $(LST)tp03.lst
