@@ -45,7 +45,7 @@ code:
     b .
 
 .section .data 
-    value_a: .word 0x000000010
+    value_a: .word 0x000000010 // La primer direccion deberia tener ete valor
 
 .section .bss
     value_b: .word
