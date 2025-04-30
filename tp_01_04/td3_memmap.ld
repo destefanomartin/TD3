@@ -50,10 +50,14 @@ MEMORY
 /* STACK Y BSS NO ESTAN INICIALIZADOS POR LO TANTO NO SE MANDAN AL LMA */
 SECTIONS
 {
-    .vectors : {
-        KEEP(*(.vectors))     /* Asegura que no se descarta esta sección */
+    reset_vector : {
+        __reset_start = .; 
+        *(reset_vector) 
+        __reset_end = .; 
     } > reset_mem_rom AT > boot_mem_rom
     
+    __reset_LMA = LOADADDR(reset_vector);
+
     boot : {
         *(boot*)
     } > boot_mem_rom AT > boot_mem_rom
