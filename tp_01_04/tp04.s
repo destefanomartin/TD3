@@ -117,27 +117,43 @@ undef_handler:
     MOVS PC, LR
 
 svc_handler:
-    SUB lr, lr, #4             // Volver a la instrucción SVC
-    LDR r1, [lr]               // Cargar instrucción SVC
-    AND r1, r1, #0xFF          // Extraer el campo inmediato (número de servicio)
-
-    CMP r1, #0
-    BEQ do_add
-    CMP r1, #1
-    BEQ do_sub
+    PUSH {R2-R12, LR}          // Guardar registros menos con los que retornamos
+    SUB LR, LR, #4             // Volver a la instrucción SVC
+    LDR R0, [LR]               // Carga la instrucción SVC completa (32 bits)
+    BIC R1, R0, #0xFF000000    
+    AND R1, R1, #0xFF          // Extrae el número del SVC (último byte)
+    CMP R1, #0
+    BEQ suma
+    CMP R1, #1
+    BEQ resta
 
     B end_svc
 
-do_add:
-    ADD r0, r0, r1
+suma:
+    MOV R0, #0xFFFFFFFF    // parte baja A
+    MOV R1, #0x00000001    // parte alta A
+    MOV R2, #0x00000001    // parte baja B
+    MOV R3, #0x00000000    // parte alta B
+    ADDS R0, R0, R2     // Parte baja, actualiza carry
+    ADC  R1, R1, R3     // Parte alta + carry
     B end_svc
 
-do_sub:
-    SUB r0, r0, r1
+resta:
+    @ MOV R0, #0xFFFFFFFE   // parte baja A
+    @ MOV R1, #0x00000001    // parte alta A
+    @ MOV R2, #0x00000001    // parte baja B
+    @ MOV R3, #0x00000000    // parte alta B
+    MOV R0, #0              
+    MOV R1, #1              
+    MOV R2, #1              
+    MOV R3, #0              
+    SUBS R0, R0, R2     // actualiza flags (incluye borrow)
+    SBC  R1, R1, R3     
     B end_svc
 
 end_svc:
-    MOVS pc, lr                // Regreso del handler
+    POP {R2-R12, LR}            // Restaurar registros menos con los que retornamos
+    MOVS PC, LR                // Regreso del handler
 
 prefetch_abort_handler:
     
