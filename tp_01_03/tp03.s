@@ -47,7 +47,7 @@ code:
 .section .data 
     value_a: .word 0x000000010 // La primer direccion deberia tener ete valor
 
-.section .bss
+.section .bss, "aw", %nobits
     value_b: .word
 
 .section .stack, "aw", %nobits

@@ -42,8 +42,8 @@ MEMORY
     boot_mem_rom : org = _BOOTLOADER_INIT, len = 0x1000
     application_mem_ram : org = _APPLICATION_INIT, len = 0x1000
     data_mem_ram : org = _DATA_INIT, len = 0x1000
-    stack_mem_ram : org = _STACK_INIT, len = 0x4000
-    bss_mem_ram : org = _BSS_INIT, len = 0x1000
+    stack_mem_ram : org = _STACK_INIT, len = 0x10000
+    bss_mem_ram : org = _BSS_INIT, len = 0x5000
 }
 
 
@@ -82,6 +82,15 @@ SECTIONS
     .stack : {
         . = ALIGN(8);
         __stack_start = .;
+
+        __stack_irq = .;
+        . = . + 0x1000;
+
+        __stack_fiq = .;
+        . = . + 0x80;
+
+        __stack_abt = .;
+        . = . + 0x80;
 
         __stack_undef = .;
         . = . + 0x1000;      /* 4KB para modo UNDEF */
