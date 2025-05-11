@@ -20,6 +20,7 @@
 .extern __stack_svc
 .extern __stack_app
 
+
 // TIMER0
 .equ TIMER0_BASE,      0x10011000
 .equ TIMER0_LOAD,      TIMER0_BASE + 0x00
@@ -60,6 +61,8 @@ jump_fiq_handler:
 .section boot,"ax"@progbits  
 _start:
 
+    // Se puede hacer como     MSR cpsr_c,#(UND_MODE | I_BIT |F_BIT) - LDR SP,=__und_stack_top__    
+
     // Configurar pila para modo UNDEF
     CPS #0x1B            // Cambiar a modo UNDEF
     LDR SP, =__stack_undef
@@ -68,9 +71,23 @@ _start:
     CPS #0x13            // Cambiar a modo SVC
     LDR SP, =__stack_svc
 
+    // Modo Abort
+    CPS #0x17            // Cambiar a modo ABORT
+    LDR SP, =__stack_abt
+
+    // Modo FIQ
+    CPS #0x11            // Cambiar a modo FIQ
+    LDR SP, =__stack_fiq
+
+    // Modo IRQ
+    CPS #0x12            // Cambiar a modo IRQ
+    LDR SP, =__stack_irq
+
     // Luego pasar a modo SYS o modo de aplicación
     CPS #0x1F            // Cambiar a modo SYS (modo usuario con privilegios)
     LDR SP, =__stack_app // (si usás una pila para el main/app)
+
+
 
 reset_copy: 
     LDR R1, =__reset_start   // destino
@@ -101,7 +118,6 @@ text_copy:
 
 .section .text // Donde va la aplicacion 
 code:
-    .word 0xE7FFFFFF
     MOV R0, #0x08
 
     SWI 0
@@ -112,14 +128,44 @@ code:
 
     MOV R0, #0x02
 
-    BL init_timer0
+    // BL init_timer0
+
+    LDR R10, =__gic_init
+    MOV LR, PC
+    BX R10
+
+    BL make_inv_exception     // Llama a función que genera instrucción inválida
+
+    @ MRS R0, cpsr
+    @ BIC R0, R0, #0x80 //habilita la IRQ
+    @ MSR cpsr_c, R0
+
+    BL make_mem_exception     // Llama a función que genera acceso inválido
+
+    MOV R0, #0x02
+
+    BL loop
+
+loop: 
+    WFI
+    B loop
 
 
-    b .
+make_mem_exception:
+    MOV R0, #0x00
+    LDR R1, [R0]           // esto genera un acceso a NULL → casi siempre provoca Data Abort
+    BX LR
+
+make_inv_exception:
+    .word 0xE7F000F0          // Instrucción inválida (causa excepción UNDEF)
+    BX lr
+
+
+
+
 
 
 init_timer0:
-    // Cargar valor para 10ms (10.000 ticks a 1 MHz)
     LDR     R0, =0xF42
     LDR     R1, =TIMER0_LOAD
     STR     R0, [R1]
@@ -136,16 +182,58 @@ init_timer0:
     BX      LR
 
 
+irq_handler:
+    SUB LR, LR, #4
+    PUSH {R0-R3, LR}
 
+    LDR R0, =TIMER0_MIS      // Dirección del registro de estado del Timer0
+    LDR R1, [R0]             // Leer valor: ¿hay interrupción pendiente?
+    CMP R1, #1               // ¿Fue el Timer0 el que pidió la interrupción?
+    BNE not_timer_irq        // Si no, salta y no hace nada
+
+    // Incrementar contador
+    LDR R2, =tick_count
+    LDR R3, [R2]
+    ADD R3, R3, #1
+    STR R3, [R2]
+
+    // También actualizar r10 (como pide el enunciado)
+    MOV R10, R3
+
+    // Limpiar la interrupción (acknowledge)
+    LDR R0, =TIMER0_INTCLR
+    MOV R1, #1
+    STR R1, [R0]
+
+not_timer_irq:
+    POP {R0-R3, LR}
+    SUBS PC, LR, #0          // Retorna de la IRQ
+    
 
 undef_handler:
-    SUB LR, LR, #4              // Volver a la instrucción que causó el fallo
-    PUSH {R0-R12, LR}
+    // SUB LR, LR, #4              // Volver a la instrucción que causó el fallo
+    PUSH {R0-R9, LR}
+    /* Codigo de ejercicio anterior 
     MOV R1, LR                  // Dirección donde ocurrió el fallo 
     LDR R2, =0x00000000         // Código de operación del andeq r0, r0, r0
+   
     STR R2, [R1]                // Sobrescribe la instrucción fallida
-    POP {R0-R12, LR} // Retorno de la excepcion
+     */
+    /* Ejercicio 5 */
+    LDR R10, =0x494E56        // "INV" en ASCII
+    POP {R0-R9, LR} // Retorno de la excepcion
+    //SUBS LR, LR, #8 // Volver a la instrucción SIGUIENTE a la que causo el fallo
     MOVS PC, LR
+
+data_abort_handler:
+    PUSH {R0-R12, LR}
+    LDR R10, =0x4D454D        // "MEM" en ASCII
+    POP {R0-R12, LR} // Retorno de la excepcion
+    SUB LR, LR, #8            // Volver a instrucción siguiente
+    MOVS PC, LR               // Retornar (permitir continuar ejecución)
+
+
+
 
 svc_handler:
     PUSH {R2-R12, LR}          // Guardar registros menos con los que retornamos
@@ -170,10 +258,6 @@ suma:
     B end_svc
 
 resta:
-    @ MOV R0, #0xFFFFFFFE   // parte baja A
-    @ MOV R1, #0x00000001    // parte alta A
-    @ MOV R2, #0x00000001    // parte baja B
-    @ MOV R3, #0x00000000    // parte alta B
     MOV R0, #0              
     MOV R1, #1              
     MOV R2, #1              
@@ -187,13 +271,14 @@ end_svc:
     MOVS PC, LR                // Regreso del handler
 
 prefetch_abort_handler:
-    
+    PUSH {R0-R9, LR}
+    LDR R10, =0x4D454D        // "MEM" en ASCII
+    POP {R0-R9, LR} // Retorno de la excepcion
+    MOVS PC, LR    
 
-data_abort_handler:
 
 reserved_handler:
 
-irq_handler:
 fiq_handler:
 reset_handler:
     b .
@@ -202,6 +287,7 @@ reset_handler:
 
 .section .bss
     value_b: .word
+    tick_count: .word 0
 
 .section .stack, "aw", %nobits
     .space 4000   // 1 KB de stack
