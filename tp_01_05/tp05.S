@@ -128,36 +128,50 @@ code:
 
     MOV R0, #0x02
 
-    // BL init_timer0
+    BL init_timer0
 
-    LDR R10, =__gic_init
-    MOV LR, PC
-    BX R10
+    @ LDR R10, =__gic_init
+    @ MOV LR, PC
+    @ BX R10
 
+    BL gic_init
+
+    #ifdef GEN_EXCEPTION
+    
+    .global conditional
+
+    conditional
     BL make_inv_exception     // Llama a función que genera instrucción inválida
 
-    @ MRS R0, cpsr
-    @ BIC R0, R0, #0x80 //habilita la IRQ
-    @ MSR cpsr_c, R0
+    // BL make_mem_exception     // Llama a función que genera acceso inválido (No funciona sin MMU)
+    #endif 
 
-    BL make_mem_exception     // Llama a función que genera acceso inválido
+    CPSIE i
+
+
 
     MOV R0, #0x02
 
     BL loop
+
+
+
 
 loop: 
     WFI
     B loop
 
 
+gic_init: 
+    
+
 make_mem_exception:
-    MOV R0, #0x00
-    LDR R1, [R0]           // esto genera un acceso a NULL → casi siempre provoca Data Abort
-    BX LR
+    LDR R0, =0xFFFFFFFF     // Dirección inválida
+    LDR R1, =0x12345    
+    STR R1, [R0]            // Provoca el Data Abort al intentar escribir
 
 make_inv_exception:
-    .word 0xE7F000F0          // Instrucción inválida (causa excepción UNDEF)
+    .word 0xE7F000F0          // Instrucción inválida
     BX lr
 
 
@@ -187,18 +201,11 @@ irq_handler:
     PUSH {R0-R3, LR}
 
     LDR R0, =TIMER0_MIS      // Dirección del registro de estado del Timer0
-    LDR R1, [R0]             // Leer valor: ¿hay interrupción pendiente?
-    CMP R1, #1               // ¿Fue el Timer0 el que pidió la interrupción?
+    LDR R1, [R0]             // leer valor
+    CMP R1, #1               // verificar si fue el timer
     BNE not_timer_irq        // Si no, salta y no hace nada
 
-    // Incrementar contador
-    LDR R2, =tick_count
-    LDR R3, [R2]
-    ADD R3, R3, #1
-    STR R3, [R2]
-
-    // También actualizar r10 (como pide el enunciado)
-    MOV R10, R3
+    ADD R10, R10, #1
 
     // Limpiar la interrupción (acknowledge)
     LDR R0, =TIMER0_INTCLR
@@ -287,7 +294,7 @@ reset_handler:
 
 .section .bss
     value_b: .word
-    tick_count: .word 0
+
 
 .section .stack, "aw", %nobits
     .space 4000   // 1 KB de stack
