@@ -43,6 +43,21 @@
 .equ TIMER0_IRQ_ID,    36
 
 
+@ PAGINACION 
+
+.equ tabla_primer_nivel, 0x70024000
+.equ tabla_segundo_nivel1, 0x70022000
+.equ tabla_segundo_nivel2, 0x700A0000
+.equ DIR_FISICA1, 0x70031000
+.equ DIR_FISICA2, 0x70030000
+.equ DIR_FISICA3, 0x70022000
+.equ DIR_FISICA4, 0x70020000
+.equ DIR_FISICA5, 0x70010000
+.equ DIR_FISICA6, 0x70000000
+.equ longitud_tablas, tabla_primer_nivel + 0x10000 - tabla_primer_nivel
+@ .equ tabala_dos_segundo_nivel 
+
+
 
 .section reset_vector, "ax"@progbits 
     LDR PC, jump_reset         @ 0x00
@@ -126,6 +141,12 @@ text_copy:
     BLX R10
     LDR R4, =code
     BLX R4
+
+
+
+    @ Inicio paginacion 
+
+
     
  
 
@@ -141,7 +162,7 @@ code:
 
     MOV R0, #0x02
 
-    BL init_timer0
+@    BL init_timer0
 
 
     @ Esto seria con codigo en C
@@ -149,7 +170,7 @@ code:
     @ MOV LR, PC
     @ BX R10
 
-    BL gic_init
+@    BL gic_init
 
 
     @ No me funciona el IFDEF, pero se que deberia ser asi 
@@ -163,11 +184,137 @@ code:
     @ @ BL make_mem_exception     @ Llama a función que genera acceso inválido (No funciona sin MMU)
     @ #endif 
 
-    CPSIE i
+@    CPSIE i
+
+
+// Para probar la paginación, escribir 0x12345678 en la
+// dirección física 0x70804564. Luego de la habilitación
+// de la MMU, deberíamos leer este valor en la dirección
+// 0x80004564.
+      LDR R0, =DIR_FISICA1 + 0x4564
+      LDR R1, =0x12345678
+      STR R1, [R0]
+
+// Borrar las tablas de paginación.
+      LDR R1, =tabla_primer_nivel
+      LDR R2, =longitud_tablas
+      MOV R0, #0
+ciclo_borrado:
+      STRB R0, [R1], #1
+      SUBS R2, #1
+      BNE ciclo_borrado
+
+// Inicializar ambas entradas de la tabla de primer nivel.
+// Índice 0x700 apunta a tabla de páginas.
+      LDR R0, =tabla_primer_nivel + 0x700*4
+      // Bits 31-10: BADDR (dirección base tabla nivel 2)
+      // 9: No usado
+      // 8-5: dominio
+      // 4: cero,
+      // 3: NS (no seguro),
+      // 2: PXN (no ejecución)
+      // 1: cero,
+      // 0: uno.
+      LDR R1, =tabla_segundo_nivel1 + 1
+      STR R1, [R0]
+
+// Segundo nivel
+
+      LDR R0, =tabla_segundo_nivel1 + 0x31*4
+      // Bits 31-12: BADDR (dirección base)
+      // 11: nG (no global),
+      // 10: S (memoria compartida)
+      // 9: AP2 (bits de permisos)
+      // 8-6: TEX (atributos de la región de memoria)
+      // 5-4: AP1, AP0 (bits de permisos)
+      // 3: C (atributos de la región de memoria)
+      // 2: B (atributos de la región de memoria)
+      // 1: uno
+      // 0: XN (la página no se puede ejecutar).
+      LDR R1, =DIR_FISICA1 + 0x12
+      STR R1, [R0, #0]
+
+      LDR R0, =tabla_segundo_nivel1 + 0x30*4
+      // Bits 31-12: BADDR (dirección base)
+      // 11: nG (no global),
+      // 10: S (memoria compartida)
+      // 9: AP2 (bits de permisos)
+      // 8-6: TEX (atributos de la región de memoria)
+      // 5-4: AP1, AP0 (bits de permisos)
+      // 3: C (atributos de la región de memoria)
+      // 2: B (atributos de la región de memoria)
+      // 1: uno
+      // 0: XN (la página no se puede ejecutar).
+      LDR R1, =DIR_FISICA2 + 0x12
+      STR R1, [R0, #0]
+
+      LDR R0, =tabla_segundo_nivel1 + 0x22*4
+      // Bits 31-12: BADDR (dirección base)
+      // 11: nG (no global),
+      // 10: S (memoria compartida)
+      // 9: AP2 (bits de permisos)
+      // 8-6: TEX (atributos de la región de memoria)
+      // 5-4: AP1, AP0 (bits de permisos)
+      // 3: C (atributos de la región de memoria)
+      // 2: B (atributos de la región de memoria)
+      // 1: uno
+      // 0: XN (la página no se puede ejecutar).
+      LDR R1, =DIR_FISICA3 + 0x12
+      STR R1, [R0, #0]
+
+
+      LDR R0, =tabla_segundo_nivel1 + 0x20*4
+      // Bits 31-12: BADDR (dirección base)
+      // 11: nG (no global),
+      // 10: S (memoria compartida)
+      // 9: AP2 (bits de permisos)
+      // 8-6: TEX (atributos de la región de memoria)
+      // 5-4: AP1, AP0 (bits de permisos)
+      // 3: C (atributos de la región de memoria)
+      // 2: B (atributos de la región de memoria)
+      // 1: uno
+      // 0: XN (la página no se puede ejecutar).
+      LDR R1, =DIR_FISICA4 + 0x12
+      STR R1, [R0, #0]
+
+      LDR R0, =tabla_segundo_nivel1 + 0x10*4
+      // Bits 31-12: BADDR (dirección base)
+      // 11: nG (no global),
+      // 10: S (memoria compartida)
+      // 9: AP2 (bits de permisos)
+      // 8-6: TEX (atributos de la región de memoria)
+      // 5-4: AP1, AP0 (bits de permisos)
+      // 3: C (atributos de la región de memoria)
+      // 2: B (atributos de la región de memoria)
+      // 1: uno
+      // 0: XN (la página no se puede ejecutar).
+      LDR R1, =DIR_FISICA5 + 0x12
+      STR R1, [R0, #0]
+
+
+      LDR R0, =tabla_segundo_nivel1 + 0x00*4
+      // Bits 31-12: BADDR (dirección base)
+      // 11: nG (no global),
+      // 10: S (memoria compartida)
+      // 9: AP2 (bits de permisos)
+      // 8-6: TEX (atributos de la región de memoria)
+      // 5-4: AP1, AP0 (bits de permisos)
+      // 3: C (atributos de la región de memoria)
+      // 2: B (atributos de la región de memoria)
+      // 1: uno
+      // 0: XN (la página no se puede ejecutar).
+      LDR R1, =DIR_FISICA6 + 0x12
+      STR R1, [R0, #0]
+
+
+
 
     BL init_vms
 
-    
+    // Habilitar MMU
+    MRC p15, 0,R1, c1, c0, 0    // Leer reg. control.
+    ORR R1, R1, #0x1            // Bit 0 es habilitación de MMU.
+    MCR p15, 0, R1, c1, c0, 0   // Escribir reg. control.    
 
 
     MOV R0, #0x02
@@ -196,12 +343,10 @@ init_vms:
     ORR     R0, R0, #0x00       
     MCR     p15, 0, R0, c2, c0, 2    @ Escribir TTBCR
 
-    MRC     p15, 0, R0, c2, c0, 0    @ Leer TTBR0
-    ORR     R0, R0, #0x82000001    
-    MCR     p15, 0, R0, c2, c0, 0   @ Escribir TTBR0
-
-    LDR R0,=_tabla_primer_nivel
+    LDR R0,= tabla_primer_nivel
     MCR p15, 0, R0, c2, c0, 0
+
+    
 
     BX LR 
 

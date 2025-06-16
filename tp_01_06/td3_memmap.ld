@@ -12,23 +12,14 @@ ENTRY(_start)
 
 
 /* VMA */
-_VECTOR_RESET_INIT = 0x00000000; 
+_VECTOR_RESET_INIT = 0x70000000; 
 _BOOTLOADER_INIT = 0x70010000; 
 _KERNEL_INIT = 0x70030000; 
-_BSS_INIT = 0x82000000;
-_STACK_INIT = 0x70060000; 
-_DATA_INIT = 0x81000000;
+_BSS_KERNEL_INIT = 0x70022000;
+_STACK_KERNEL_INIT = 0x70020000; 
+_DATA_KERNEL_INIT = 0x70031000;
 
 
-/* Task1 */ 
-_APPLICATION_T1_INIT = 0x70040000; 
-_BSS_T1_INIT = 0x70100000; 
-_DATA_T1_INIT = 0x700A0000; 
-
-/* Task2 */
-_APPLICATION_T2_INIT = 0x70040000;  
-_BSS_T2_INIT = 0x70100000; 
-_DATA_T2_INIT = 0x700A0000; 
 
 
 /* 
@@ -38,10 +29,10 @@ MEMORY
 {
     reset_mem_rom	: org = _VECTOR_RESET_INIT, len = 0x1000
     boot_mem_rom : org = _BOOTLOADER_INIT, len = 0x1000
-    application_mem_ram : org = _APPLICATION_INIT, len = 0x1000
-    data_mem_ram : org = _DATA_INIT, len = 0x1000
-    stack_mem_ram : org = _STACK_INIT, len = 0x10000
-    bss_mem_ram : org = _BSS_INIT, len = 0x5000
+    application_mem_ram : org = _KERNEL_INIT, len = 0x1000
+    data_mem_ram : org = _DATA_KERNEL_INIT, len = 0x1000
+    stack_mem_ram : org = _STACK_KERNEL_INIT, len = 0x10000
+    bss_mem_ram : org = _BSS_KERNEL_INIT, len = 0x5000
 }
 
 
