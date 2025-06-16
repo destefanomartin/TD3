@@ -165,6 +165,9 @@ code:
 
     CPSIE i
 
+    BL init_vms
+
+    
 
 
     MOV R0, #0x02
@@ -178,6 +181,29 @@ loop:
     WFI
     B loop
 
+
+
+init_vms: 
+
+    LDR R0, =0x55555555
+    MCR p15, 0, R0, c3, c0, 0 @ ok 
+
+    MRC     p15, 0, R0, c1, c0, 0    @ Leer SCTLR
+    ORR     R0, R0, #0x20000000       @ Establecer bit AFE (bit 29)
+    MCR     p15, 0, R0, c1, c0, 0    @ Escribir SCTLR
+
+    MRC     p15, 0, R0, c2, c0, 2    @ Leer TTBCR
+    ORR     R0, R0, #0x00       
+    MCR     p15, 0, R0, c2, c0, 2    @ Escribir TTBCR
+
+    MRC     p15, 0, R0, c2, c0, 0    @ Leer TTBR0
+    ORR     R0, R0, #0x82000001    
+    MCR     p15, 0, R0, c2, c0, 0   @ Escribir TTBR0
+
+    LDR R0,=_tabla_primer_nivel
+    MCR p15, 0, R0, c2, c0, 0
+
+    BX LR 
 
 gic_init: 
 
@@ -194,7 +220,6 @@ gic_init:
     MOV R3, #0x00
     LDR R1, =0x424              // 0x400 + 36 
     STRB R3, [R2, R1]
-
 
     MOV R1, #0x01
     STR R1, [R0]
