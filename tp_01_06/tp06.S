@@ -47,13 +47,17 @@
 
 .equ tabla_primer_nivel, 0x70024000
 .equ tabla_segundo_nivel1, 0x70022000
-.equ tabla_segundo_nivel2, 0x700A0000
+.equ tabla_segundo_nivel2, 0x70022400
+.equ tabla_segundo_nivel3, 0x70022800
 .equ DIR_FISICA1, 0x70031000
 .equ DIR_FISICA2, 0x70030000
 .equ DIR_FISICA3, 0x70022000
 .equ DIR_FISICA4, 0x70020000
 .equ DIR_FISICA5, 0x70010000
 .equ DIR_FISICA6, 0x70000000
+.equ DIR_FISICA7, GICC0_ADDR
+.equ DIR_FISICA8, GICD0_ADDR
+.equ DIR_FISICA9, TIMER0_BASE
 .equ longitud_tablas, tabla_primer_nivel + 0x10000 - tabla_primer_nivel
 @ .equ tabala_dos_segundo_nivel 
 
@@ -218,6 +222,31 @@ ciclo_borrado:
       LDR R1, =tabla_segundo_nivel1 + 1
       STR R1, [R0]
 
+      LDR R0, =tabla_primer_nivel + 0x1E0*4
+      // Bits 31-10: BADDR (dirección base tabla nivel 2)
+      // 9: No usado
+      // 8-5: dominio
+      // 4: cero,
+      // 3: NS (no seguro),
+      // 2: PXN (no ejecución)
+      // 1: cero,
+      // 0: uno.
+      LDR R1, =tabla_segundo_nivel2 + 1
+      STR R1, [R0]
+
+      LDR R0, =tabla_primer_nivel + 0x100*4
+      // Bits 31-10: BADDR (dirección base tabla nivel 2)
+      // 9: No usado
+      // 8-5: dominio
+      // 4: cero,
+      // 3: NS (no seguro),
+      // 2: PXN (no ejecución)
+      // 1: cero,
+      // 0: uno.
+      LDR R1, =tabla_segundo_nivel3 + 1
+      STR R1, [R0]
+
+
 // Segundo nivel
 
       LDR R0, =tabla_segundo_nivel1 + 0x31*4
@@ -306,8 +335,49 @@ ciclo_borrado:
       LDR R1, =DIR_FISICA6 + 0x12
       STR R1, [R0, #0]
 
+      LDR R0, =tabla_segundo_nivel2 + 0x00*4
+      // Bits 31-12: BADDR (dirección base)
+      // 11: nG (no global),
+      // 10: S (memoria compartida)
+      // 9: AP2 (bits de permisos)
+      // 8-6: TEX (atributos de la región de memoria)
+      // 5-4: AP1, AP0 (bits de permisos)
+      // 3: C (atributos de la región de memoria)
+      // 2: B (atributos de la región de memoria)
+      // 1: uno
+      // 0: XN (la página no se puede ejecutar).
+      LDR R1, =DIR_FISICA7 + 0x12
+      STR R1, [R0, #0]
 
+      LDR R0, =tabla_segundo_nivel2 + 0x01*4
+      // Bits 31-12: BADDR (dirección base)
+      // 11: nG (no global),
+      // 10: S (memoria compartida)
+      // 9: AP2 (bits de permisos)
+      // 8-6: TEX (atributos de la región de memoria)
+      // 5-4: AP1, AP0 (bits de permisos)
+      // 3: C (atributos de la región de memoria)
+      // 2: B (atributos de la región de memoria)
+      // 1: uno
+      // 0: XN (la página no se puede ejecutar).
+      LDR R1, =DIR_FISICA8 + 0x12
+      STR R1, [R0, #0]
 
+      LDR R0, =tabla_segundo_nivel2 + 0x11*4
+      // Bits 31-12: BADDR (dirección base)
+      // 11: nG (no global),
+      // 10: S (memoria compartida)
+      // 9: AP2 (bits de permisos)
+      // 8-6: TEX (atributos de la región de memoria)
+      // 5-4: AP1, AP0 (bits de permisos)
+      // 3: C (atributos de la región de memoria)
+      // 2: B (atributos de la región de memoria)
+      // 1: uno
+      // 0: XN (la página no se puede ejecutar).
+      LDR R1, =DIR_FISICA9 + 0x12
+      STR R1, [R0, #0]      
+
+    @ Fin inicialización de tablas de paginación
 
     BL init_vms
 
