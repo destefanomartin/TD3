@@ -58,7 +58,7 @@
 .equ DIR_FISICA7, GICC0_ADDR
 .equ DIR_FISICA8, GICD0_ADDR
 .equ DIR_FISICA9, TIMER0_BASE
-.equ longitud_tablas, tabla_primer_nivel + 0x10000 - tabla_primer_nivel
+.equ longitud_tablas, tabla_primer_nivel + 0x10000 - tabla_segundo_nivel3
 @ .equ tabala_dos_segundo_nivel 
 
 
@@ -156,41 +156,6 @@ text_copy:
 
 .section .text @ Donde va la aplicacion 
 code:
-    MOV R10, #0x00
-
-    SWI 0
-
-    MOV R0, #0x04
-
-    SWI 1
-
-    MOV R0, #0x02
-
-@    BL init_timer0
-
-
-    @ Esto seria con codigo en C
-    @ LDR R10, =__gic_init
-    @ MOV LR, PC
-    @ BX R10
-
-@    BL gic_init
-
-
-    @ No me funciona el IFDEF, pero se que deberia ser asi 
-    @ #ifdef GEN_EXCEPTION
-    
-    @ .global conditional
-
-    @ conditional:
-    @ BL make_inv_exception     @ Llama a función que genera instrucción inválida
-
-    @ @ BL make_mem_exception     @ Llama a función que genera acceso inválido (No funciona sin MMU)
-    @ #endif 
-
-@    CPSIE i
-
-
 // Para probar la paginación, escribir 0x12345678 en la
 // dirección física 0x70804564. Luego de la habilitación
 // de la MMU, deberíamos leer este valor en la dirección
@@ -363,7 +328,7 @@ ciclo_borrado:
       LDR R1, =DIR_FISICA8 + 0x12
       STR R1, [R0, #0]
 
-      LDR R0, =tabla_segundo_nivel2 + 0x11*4
+      LDR R0, =tabla_segundo_nivel3 + 0x11*4
       // Bits 31-12: BADDR (dirección base)
       // 11: nG (no global),
       // 10: S (memoria compartida)
@@ -388,6 +353,32 @@ ciclo_borrado:
 
 
     MOV R0, #0x02
+
+    BL init_timer0
+
+
+    @ Esto seria con codigo en C
+    @ LDR R10, =__gic_init
+    @ MOV LR, PC
+    @ BX R10
+
+    BL gic_init
+
+
+    @ No me funciona el IFDEF, pero se que deberia ser asi 
+    @ #ifdef GEN_EXCEPTION
+    
+    @ .global conditional
+
+    @ conditional:
+    @ BL make_inv_exception     @ Llama a función que genera instrucción inválida
+
+    @ @ BL make_mem_exception     @ Llama a función que genera acceso inválido (No funciona sin MMU)
+    @ #endif 
+
+    CPSIE i
+
+    //BL make_inv_exception     @ Llama a función que genera instrucción inválida
 
     BL loop
 
@@ -432,9 +423,9 @@ gic_init:
     STR R3, [R2, #0x104]
 
     @ Asignar prioridad maxima IRQ 36
-    MOV R3, #0x00
-    LDR R1, =0x424              // 0x400 + 36 
-    STRB R3, [R2, R1]
+    @ MOV R3, #0x00
+    @ LDR R1, =0x424              // 0x400 + 36 
+    @ STRB R3, [R2, R1]
 
     MOV R1, #0x01
     STR R1, [R0]
@@ -566,7 +557,7 @@ reserved_handler:
 
 fiq_handler:
 reset_handler:
-@ ldr PC,=_start
+   ldr PC,=_start
    B _start
 
 
