@@ -16,7 +16,8 @@ _VECTOR_RESET_INIT = 0x70000000;
 _BOOTLOADER_INIT = 0x70010000; 
 _KERNEL_INIT = 0x70030000; 
 _BSS_KERNEL_INIT = 0x70022000;
-_STACK_KERNEL_INIT = 0x70020000; 
+_STACK_KERNEL_INIT = 0x70020000;
+_PUBLIC_STACK_INIT = 0x70021000; 
 _DATA_KERNEL_INIT = 0x70031000;
 
 
@@ -31,8 +32,9 @@ MEMORY
     boot_mem_rom : org = _BOOTLOADER_INIT, len = 0x1000
     application_mem_ram : org = _KERNEL_INIT, len = 0x1000
     data_mem_ram : org = _DATA_KERNEL_INIT, len = 0x1000
-    stack_mem_ram : org = _STACK_KERNEL_INIT, len = 0x10000
-    bss_mem_ram : org = _BSS_KERNEL_INIT, len = 0x5000
+    stack_mem_ram : org = _STACK_KERNEL_INIT, len = 0x1000
+    public_stack_mem_ram : org = _PUBLIC_STACK_INIT, len = 0x1000
+    bss_mem_ram : org = _BSS_KERNEL_INIT, len = 0x1000
 }
 
 
@@ -73,7 +75,7 @@ SECTIONS
         __stack_start = .;
 
         __stack_irq = .;
-        . = . + 0x1000;
+        . = . + 0x80;
 
         __stack_fiq = .;
         . = . + 0x80;
@@ -82,13 +84,10 @@ SECTIONS
         . = . + 0x80;
 
         __stack_undef = .;
-        . = . + 0x1000;      /* 4KB para modo UNDEF */
+        . = . + 0x80;      
 
         __stack_svc = .;
-        . = . + 0x1000;      /* 4KB para modo SVC */
-
-        __stack_app = .;
-        . = . + 0x1000;
+        . = . + 0x80;      
 
         __stack_bottom = .;
     } > stack_mem_ram 
