@@ -9,7 +9,7 @@ tp06.bin: tp06.elf
 	$(CHAIN)-objcopy -O binary $< $@
 
 
-tp06.elf: tp06.o move_function.o gic.o
+tp06.elf: tp06.o gic.o move_function.o 
 	$(CHAIN)-ld -g -T td3_memmap.ld *.o -o tp06.elf -Map $(LST)tp06.map
 	$(CHAIN)-objdump -D tp06.elf > tp06.lst
 
