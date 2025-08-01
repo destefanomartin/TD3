@@ -74,8 +74,6 @@ jump_fiq_handler:
 .section boot,"ax"@progbits  
 _start:
 
-    @ Se puede hacer como     MSR cpsr_c,#(UND_MODE | I_BIT |F_BIT) - LDR SP,=__und_stack_top__    
-
     @ Configurar pila para modo UNDEF
     CPS #0x1B            @ Cambiar a modo UNDEF
     LDR SP, =__stack_undef
