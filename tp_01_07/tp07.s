@@ -433,4 +433,10 @@ irq_handler:
     PUSH {R0}           
     MOV R0, #1                
     STR R0, [TIMER0_BASE, #0x0C]  @ Limpiar interrupcion
+
+    LDR R1, =task_order
+    CMP R1, #0 
+    BEQ task1
+    CMP R1, #1
+    BEQ task2
     

@@ -95,6 +95,7 @@ jump_fiq_handler:
 .section boot,"ax"@progbits  
 _start:
 
+
     @ Configurar pila para modo UNDEF
     CPS #0x1B            @ Cambiar a modo UNDEF
     LDR SP, =__stack_undef
