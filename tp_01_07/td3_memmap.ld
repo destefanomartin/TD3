@@ -36,15 +36,15 @@ TASK_STACK_SIZE = 0x1000;
 MEMORY
 {
     reset_mem_rom: org = _VECTOR_RESET_INIT, len = 0x1000
-    boot_mem_rom : org = _BOOTLOADER_INIT, len = 0x1000
-    application_mem_ram : org = _KERNEL_INIT, len = 0x1000
+    boot_mem_rom : org = _BOOTLOADER_INIT, len = 1M
+    application_mem_ram : org = _KERNEL_INIT, len = 1M
     data_mem_ram : org = _DATA_KERNEL_INIT, len = 0x1000
-    public_stack_mem_ram : org = _PUBLIC_STACK_INIT, len = 0x1000
+    public_stack_mem_ram : org = _PUBLIC_STACK_INIT, len = 1M
     bss_mem_ram : org = _BSS_KERNEL_INIT, len = 0x1000
-    task_mem_rom : org = _TASK_INIT, len = 0x2000
-    task_data_mem_rom: org = _DATA_TASK_INIT, len = 0x2000 
+    task_mem_rom : org = _TASK_INIT, len = 1M
+    task_data_mem_rom: org = _DATA_TASK_INIT, len = 8192K 
     task_bss_mem_rom: org = _BSS_TASK_INIT, len = 0x2000 
-    task_stack_mem_ram: org = _TASK_STACK_INIT, len = 0x2000
+    task_stack_mem_ram: org = _TASK_STACK_INIT, len = 1M
 }
 
 
