@@ -68,29 +68,96 @@ _start:
     LDR SP, =__stack_app @ (si usás una pila para el app)
 
 reset_copy: 
-    LDR R1, =__reset_start   @ destino
-    LDR R0, =__reset_LMA     @ origen
+    LDR R0, =__reset_start   @ destino
+    LDR R1, =__reset_LMA     @ origen
     LDR R2, =__reset_end
-    SUB R2, R2, R1           @ tamaño de la copia
-    LDR R10, =move
-    BLX R10
+    SUB R2, R2, R0           @ tamaño de la copia
+
+byte_copy:
+    LDRB R3, [R1], #1
+    STRB R3, [R0], #1
+    SUBS R2, R2, #1
+    BNE byte_copy// Verifica flag 
 
 data_copy: 
-    LDR R1, =__data_start     @ destino
-    LDR R0, =__data_LMA       @ origen
+    LDR R0, =__data_start     @ destino
+    LDR R1, =__data_LMA       @ origen
     LDR R2, =__data_end
     SUB R2, R2, R1            @ tamaño de la copia
-    LDR R10, =move
-    BLX R10
+
+byte_copy1:
+    LDRB R3, [R1], #1
+    STRB R3, [R0], #1
+    SUBS R2, R2, #1
+    BNE byte_copy1// Verifica flag 
+
 text_copy:
-    LDR R1, =__text_start     @ destino
-    LDR R0, =__text_LMA       @ origen
+    LDR R0, =__text_start     @ destino
+    LDR R1, =__text_LMA       @ origen
     LDR R2, =__text_end
     SUB R2, R2, R1            @ tamaño de la copia
-    LDR R10, =move
-    BLX R10
+
+byte_copy2:
+    LDRB R3, [R1], #1
+    STRB R3, [R0], #1
+    SUBS R2, R2, #1
+    BNE byte_copy2// Verifica flag 
+
     LDR R4, =code
     BLX R4
+
+
+
+
+@ reset_copy: 
+@     LDR R1, =__reset_start   @ destino
+@     LDR R0, =__reset_LMA     @ origen
+@     LDR R2, =__reset_end
+@     SUB R2, R2, R1           @ tamaño de la copia
+@     LDR R10, =move
+@     BLX R10
+
+@ data_copy: 
+@     LDR R1, =__data_start     @ destino
+@     LDR R0, =__data_LMA       @ origen
+@     LDR R2, =__data_end
+@     SUB R2, R2, R1            @ tamaño de la copia
+@     LDR R10, =move
+@     BLX R10
+@ text_copy:
+@     LDR R1, =__text_start     @ destino
+@     LDR R0, =__text_LMA       @ origen
+@     LDR R2, =__text_end
+@     SUB R2, R2, R1            @ tamaño de la copia
+@     LDR R10, =move
+@     BLX R10
+@     LDR R4, =code
+@     BLX R4
+
+@ reset_copy: 
+@     LDR R1, =__reset_start   @ destino
+@     LDR R0, =__reset_LMA     @ origen
+@     LDR R2, =__reset_end
+@     SUB R2, R2, R1           @ tamaño de la copia
+@     LDR R10, =move
+@     BLX R10
+
+@ data_copy: 
+@     LDR R1, =__data_start     @ destino
+@     LDR R0, =__data_LMA       @ origen
+@     LDR R2, =__data_end
+@     SUB R2, R2, R1            @ tamaño de la copia
+@     LDR R10, =move
+@     BLX R10
+@ text_copy:
+@     LDR R1, =__text_start     @ destino
+@     LDR R0, =__text_LMA       @ origen
+@     LDR R2, =__text_end
+@     SUB R2, R2, R1            @ tamaño de la copia
+@     LDR R10, =move
+@     BLX R10
+@     LDR R4, =code
+@     BLX R4
     
  
 
