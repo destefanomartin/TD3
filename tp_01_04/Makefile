@@ -8,15 +8,15 @@ tp04.bin: tp04.elf
 	$(CHAIN)-objcopy -O binary $< $@
 
 
-tp04.elf: tp04.o move_function.o
+tp04.elf: tp04.o #move_function.o
 	$(CHAIN)-ld -g -T td3_memmap.ld *.o -o tp04.elf -Map $(LST)tp04.map
 	$(CHAIN)-objdump -D tp04.elf > tp04.lst
 
 tp04.o: tp04.s
 	$(CHAIN)-as tp04.s -g -o tp04.o -a > $(LST)tp04.lst
 
-move_function.o: move_function.c
-	$(CHAIN)-gcc -g -O0 $(CFLAGS) -c move_function.c -o move_function.o
+# move_function.o: move_function.c
+# 	$(CHAIN)-gcc -g -O0 $(CFLAGS) -c move_function.c -o move_function.o
 
 clean:
 	rm -rf *.o *.elf *.bin $(LST)*.lst $(LST)*.txt $(LST)*.map
