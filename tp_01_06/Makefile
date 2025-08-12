@@ -9,7 +9,7 @@ tp06.bin: tp06.elf
 	$(CHAIN)-objcopy -O binary $< $@
 
 
-tp06.elf: tp06.o gic.o move_function.o 
+tp06.elf: tp06.o #gic.o #move_function.o 
 	$(CHAIN)-ld -g -T td3_memmap.ld *.o -o tp06.elf -Map $(LST)tp06.map
 	$(CHAIN)-objdump -D tp06.elf > tp06.lst
 
@@ -17,11 +17,11 @@ tp06.elf: tp06.o gic.o move_function.o
 tp06.o: tp06.S
 	$(CHAIN)-as tp06.S -g -o tp06.o -a > $(LST)tp06.lst
 
-move_function.o: move_function.c
-	$(CHAIN)-gcc -g -O0 $(CFLAGS) -c move_function.c -o move_function.o
+#move_function.o: move_function.c
+#	$(CHAIN)-gcc -g -O0 $(CFLAGS) -c move_function.c -o move_function.o
 
-gic.o: gic.c
-	$(CHAIN)-gcc -g -O0 $(CFLAGS) -c gic.c -o gic.o 
+#gic.o: gic.c
+#	$(CHAIN)-gcc -g -O0 $(CFLAGS) -c gic.c -o gic.o 
 
 exceptions: 
 	$(CHAIN)-as tp06.S -g -Wall -DGEN_EXCEPTION -o tp06.o -a  > $(LST)tp06.lst 

@@ -12,45 +12,49 @@ ENTRY(_start)
 
 
 /* VMA */
-_VECTOR_RESET_INIT = 0x7000000
-_BOOTLOADER_INIT = 0x70010000
-_KERNEL_INIT = 0x70030000
-_DATA_KERNEL_INIT = 0x81000000
-_BSS_KERNEL_INIT = 0x82000000
-_PUBLIC_STACK_INIT = 0x70020000
+_VECTOR_RESET_INIT = 0x70000000;
+_BOOTLOADER_INIT_ = 0x70010000;
+_KERNEL_INIT = 0x70030000;
+_DATA_KERNEL_INIT = 0x81000000;
+_BSS_KERNEL_INIT = 0x82000000;
+_TASK_INIT = 0x70040000;
+_DATA_TASK_INIT = 0x700A0000;
+_BSS_TASK_INIT = 0x70100000;
+_PUBLIC_STACK_INIT = 0x70060000;
+_READAREA_INIT = 0x70A00000; 
 
-
-/* Tarea 1 
-
-_TASK_INIT = 0x70040000
-_DATA_TASK_INIT = 0x700A0000
-_BSS_TASK_INIT = 0x70100000
-_TASK_STACK_INIT = 0x7006000
 
 TASK_STACK_SIZE = 0x1000;
 
+STACK_SIZE = 0x4000;
 
 /* 
     Definición del mapa de memoria
 */
 MEMORY
 {
-    reset_mem_rom: org = _VECTOR_RESET_INIT, len = 0x1000
-    boot_mem_rom : org = _BOOTLOADER_INIT, len = 0x1000
+    reset_mem_rom   : org = _VECTOR_RESET_INIT, len = 0x1000
+    boot_mem_rom    : org = _BOOTLOADER_INIT_, len = 0x1000
     application_mem_ram : org = _KERNEL_INIT, len = 0x1000
     data_mem_ram : org = _DATA_KERNEL_INIT, len = 0x1000
-    public_stack_mem_ram : org = _PUBLIC_STACK_INIT, len = 0x1000
-    bss_mem_ram : org = _BSS_KERNEL_INIT, len = 0x1000
+    bss_mem_ram : org = _BSS_KERNEL_INIT, len = 128K
     task_mem_rom : org = _TASK_INIT, len = 0x1000
-    task_data_mem_rom: org = _DATA_TASK_INIT, len = 8192K 
-    task_bss_mem_rom: org = _BSS_TASK_INIT, len = 0x2000 
-    task_stack_mem_ram: org = _TASK_STACK_INIT, len = 0x1000
+    task_data_mem_rom   : org = _DATA_TASK_INIT, len = 8192K 
+    task_bss_mem_rom    : org = _BSS_TASK_INIT, len = 0x2000 
+    stack_mem_ram  : org = _PUBLIC_STACK_INIT, len = STACK_SIZE
+    readarea_mem_ram : org = _READAREA_INIT, len = 128K
 }
 
 
 /* STACK Y BSS NO ESTAN INICIALIZADOS POR LO TANTO NO SE MANDAN AL LMA */
 SECTIONS
 {
+
+
+    boot : {
+        *(boot*)
+    } > boot_mem_rom AT > boot_mem_rom
+    
     reset_vector : {
         __reset_start__ = .; 
         *(reset_vector) 
@@ -58,13 +62,6 @@ SECTIONS
     } > reset_mem_rom AT > boot_mem_rom
     
     __reset_LMA = LOADADDR(reset_vector);
-
-    . = _BOOTLOADER_INIT; 
-    boot : {
-        *(boot*)
-    } > boot_mem_rom AT > boot_mem_rom
-    
-    . = 
     .text : { 
         __text_start__ = .; 
         *(.text*)
@@ -91,49 +88,32 @@ SECTIONS
     
     . = _PUBLIC_STACK_INIT; 
     .stack : {
-        . = ALIGN(8);
-        __stack_start = .;
 
+     __stack_start__ = .;
+        . += 0x80;
+        . = ALIGN(4);
         __stack_irq = .;
-        . = . + 0x80;
 
+        . += 0x80;
+        . = ALIGN(4);
         __stack_fiq = .;
-        . = . + 0x80;
 
-        __stack_abt = .;
-        . = . + 0x80;
-
-        __stack_undef = .;
-        . = . + 0x80;      
-
+        . += 0x80;
+        . = ALIGN(4);
         __stack_svc = .;
-        . = . + 0x80;      
 
-        __stack_bottom = .;
-    } > stack_mem_ram 
+        . += 0x80;
+        . = ALIGN(4);
+        __stack_abt = .;
 
-    .= _TASK_INIT; 
-    .task_text : { 
-        __text_task_start__ = .;
-        *(.t1_text*) 
-        __text_task_end__ = .;
-    }  > task_mem_rom AT > boot_mem_rom
+        . += 0x80;
+        . = ALIGN(4);
+        __stack_undef = .;
 
-    .task_data : { 
-        __data_task_start__ = .;
-        *(.task_data*) 
-        __data_task_end__ = .;
-    } > task_data_mem_rom AT > boot_mem_rom
+        __public_stack_start = .;            
+        . = . + TASK_STACK_SIZE;
+        __public_stack_end = .;             
 
-    .task_bss (NOLOAD): {
-        __bss_task_start__ = .;
-        *(.task_bss*)
-        __bss_task_end__ = .;
-    } > task_bss_mem_rom
-
-    . = _TASK_STACK_INIT; 
-    .task_stack : ALIGN(4)
-    {
         /* pila de tarea 1 */
         __stack_task1_start = .;            
         . = . + TASK_STACK_SIZE;
@@ -144,6 +124,49 @@ SECTIONS
         . = . + TASK_STACK_SIZE;
         __stack_task2_end = .;
 
-        
-    }  > task_stack_mem_ram
+    } > stack_mem_ram
+
+
+    . = _TASK_INIT; 
+    .task_text : {
+        . = ALIGN(4);
+        __t1_text_start__ = .;
+        *(.t1_text*)
+        __t1_text_end__   = .;
+        __t1_text_LMA     = LOADADDR(.task_text) + (__t1_text_start__ - ADDR(.task_text));
+
+        __t2_text_start__ = .;
+        *(.t2_text*)
+        __t2_text_end__   = .;
+        __t2_text_LMA     = LOADADDR(.task_text) + (__t2_text_start__ - ADDR(.task_text));
+    } > task_mem_rom AT > boot_mem_rom
+
+
+    .task_data : { 
+        __data_task1_start__ = .;
+        *(.task1_data*) 
+        __data_task1_end__ = .;
+        *(.task2_data*) 
+        __data_task2_end__ = .;
+    } > task_data_mem_rom AT > boot_mem_rom
+
+    __data_task_LMA = LOADADDR(.task_data);
+
+
+    .task_bss (NOLOAD): {
+        __bss_task1_start__ = .;
+        *(.task1_bss*)
+        __bss_task1_end__ = .;
+        __bss_task2_start__ = .;
+        *(.task2_bss*)
+        __bss_task2_end__ = .;
+    } > task_bss_mem_rom
+
+    .readarea : {
+        . = ALIGN(4);
+        __readarea_start__ = .;
+        *(.readarea*)               
+        __readarea_end__ = .;
+    } > readarea_mem_ram AT > boot_mem_rom
+
 }
