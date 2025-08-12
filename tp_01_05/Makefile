@@ -9,7 +9,7 @@ tp05.bin: tp05.elf
 	$(CHAIN)-objcopy -O binary $< $@
 
 
-tp05.elf: tp05.o move_function.o gic.o
+tp05.elf: tp05.o  gic.o	#move_function.o
 	$(CHAIN)-ld -g -T td3_memmap.ld *.o -o tp05.elf -Map $(LST)tp05.map
 	$(CHAIN)-objdump -D tp05.elf > tp05.lst
 
@@ -17,8 +17,8 @@ tp05.elf: tp05.o move_function.o gic.o
 tp05.o: tp05.S
 	$(CHAIN)-as tp05.S -g -o tp05.o -a > $(LST)tp05.lst
 
-move_function.o: move_function.c
-	$(CHAIN)-gcc -g -O0 $(CFLAGS) -c move_function.c -o move_function.o
+#move_function.o: move_function.c
+#	$(CHAIN)-gcc -g -O0 $(CFLAGS) -c move_function.c -o move_function.o
 
 gic.o: gic.c
 	$(CHAIN)-gcc -g -O0 $(CFLAGS) -c gic.c -o gic.o 

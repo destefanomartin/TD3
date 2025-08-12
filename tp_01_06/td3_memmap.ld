@@ -34,13 +34,18 @@ MEMORY
     data_mem_ram : org = _DATA_KERNEL_INIT, len = 0x1000
     stack_mem_ram : org = _STACK_KERNEL_INIT, len = 0x1000
     public_stack_mem_ram : org = _PUBLIC_STACK_INIT, len = 0x1000
-    bss_mem_ram : org = _BSS_KERNEL_INIT, len = 0x1000
+    bss_mem_ram : org = _BSS_KERNEL_INIT, len = 0x8000
 }
 
 
 /* STACK Y BSS NO ESTAN INICIALIZADOS POR LO TANTO NO SE MANDAN AL LMA */
 SECTIONS
 {
+
+    boot : {
+        *(boot*)
+    } > boot_mem_rom AT > boot_mem_rom
+
     reset_vector : {
         __reset_start = .; 
         *(reset_vector) 
@@ -48,10 +53,6 @@ SECTIONS
     } > reset_mem_rom AT > boot_mem_rom
     
     __reset_LMA = LOADADDR(reset_vector);
-
-    boot : {
-        *(boot*)
-    } > boot_mem_rom AT > boot_mem_rom
     
     .text : { 
         __text_start = .; 

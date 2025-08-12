@@ -54,7 +54,7 @@
 .equ DIR_FISICA3, 0x70022000
 .equ DIR_FISICA4, 0x70020000
 .equ DIR_FISICA5, 0x70010000
-.equ DIR_FISICA6, 0x70000000
+.equ DIR_FISICA6, 0x00000000
 .equ DIR_FISICA7, GICC0_ADDR
 .equ DIR_FISICA8, GICD0_ADDR
 .equ DIR_FISICA9, TIMER0_BASE
@@ -120,41 +120,75 @@ _start:
     CPS #0x1F            @ Cambiar a modo SYS 
     LDR SP, =_PUBLIC_STACK_INIT
 
+@ COPIA CON C 
+@ reset_copy: 
+@     LDR R1, =__reset_start   @ destino
+@     LDR R0, =__reset_LMA     @ origen
+@     LDR R2, =__reset_end
+@     SUB R2, R2, R1           @ tamaño de la copia
+@     LDR R10, =move
+@     BLX R10
 
-
+@ data_copy: 
+@     LDR R1, =__data_start     @ destino
+@     LDR R0, =__data_LMA       @ origen
+@     LDR R2, =__data_end
+@     SUB R2, R2, R1            @ tamaño de la copia
+@     LDR R10, =move
+@     BLX R10
+@ text_copy:
+@     LDR R1, =__text_start     @ destino
+@     LDR R0, =__text_LMA       @ origen
+@     LDR R2, =__text_end
+@     SUB R2, R2, R1            @ tamaño de la copia
+@     LDR R10, =move
+@     BLX R10
+    
 reset_copy: 
-    LDR R1, =__reset_start   @ destino
-    LDR R0, =__reset_LMA     @ origen
+    LDR R0, =__reset_start   @ destino
+    LDR R1, =__reset_LMA     @ origen
     LDR R2, =__reset_end
-    SUB R2, R2, R1           @ tamaño de la copia
-    LDR R10, =move
-    BLX R10
+    SUB R2, R2, R0           @ tamaño de la copia
+
+byte_copy:
+    LDRB R3, [R1], #1
+    STRB R3, [R0], #1
+    SUBS R2, R2, #1
+    BNE byte_copy// Verifica flag 
 
 data_copy: 
-    LDR R1, =__data_start     @ destino
-    LDR R0, =__data_LMA       @ origen
+    LDR R0, =__data_start     @ destino
+    LDR R1, =__data_LMA       @ origen
     LDR R2, =__data_end
     SUB R2, R2, R1            @ tamaño de la copia
-    LDR R10, =move
-    BLX R10
+
+byte_copy1:
+    LDRB R3, [R1], #1
+    STRB R3, [R0], #1
+    SUBS R2, R2, #1
+    BNE byte_copy1// Verifica flag 
+
 text_copy:
-    LDR R1, =__text_start     @ destino
-    LDR R0, =__text_LMA       @ origen
+    LDR R0, =__text_start     @ destino
+    LDR R1, =__text_LMA       @ origen
     LDR R2, =__text_end
     SUB R2, R2, R1            @ tamaño de la copia
-    LDR R10, =move
-    BLX R10
-    LDR R4, =code
-    BLX R4
 
-
+byte_copy2:
+    LDRB R3, [R1], #1
+    STRB R3, [R0], #1
+    SUBS R2, R2, #1
+    BNE byte_copy2// Verifica flag 
+    
 
     @ Inicio paginacion 
 // Para probar la paginación, escribir 0x12345678 en la
 // dirección física 0x70804564. Luego de la habilitación
 // de la MMU, deberíamos leer este valor en la dirección
 // 0x80004564.
-    LDR R0, =DIR_FISICA1 + 0x4564
+
+paginacion:
+    LDR R0, =DIR_FISICA1 + 0x44
     LDR R1, =0x12345678
     STR R1, [R0]
 
@@ -359,6 +393,12 @@ ciclo_borrado:
     ORR R1, R1, #0x1            // Bit 0 es habilitación de MMU.
     MCR p15, 0, R1, c1, c0, 0   // Escribir reg. control.    
 
+    LDR     R0, =0x70000000  
+    MCR     p15, 0, R0, c12, c0, 0   // Write to VBAR
+    ISB                              // Asegurar sincronización
+
+    LDR R4, =code
+    BLX R4
 
     
  
@@ -411,13 +451,13 @@ init_vms:
     LDR R0, =0x55555555
     MCR p15, 0, R0, c3, c0, 0 @ ok 
 
-    MRC     p15, 0, R0, c1, c0, 0    @ Leer SCTLR
-    ORR     R0, R0, #0x20000000       @ Establecer bit AFE (bit 29)
-    MCR     p15, 0, R0, c1, c0, 0    @ Escribir SCTLR
+    MRC p15, 0, R0, c1, c0, 0    @ Leer SCTLR
+    ORR R0, R0, #0x20000000       @ Establecer bit AFE (bit 29)
+    MCR p15, 0, R0, c1, c0, 0    @ Escribir SCTLR
 
-    MRC     p15, 0, R0, c2, c0, 2    @ Leer TTBCR
-    ORR     R0, R0, #0x00       
-    MCR     p15, 0, R0, c2, c0, 2    @ Escribir TTBCR
+    MRC p15, 0, R0, c2, c0, 2    @ Leer TTBCR
+    ORR R0, R0, #0x00
+    MCR p15, 0, R0, c2, c0, 2    @ Escribir TTBCR
 
     LDR R0,= tabla_primer_nivel
     MCR p15, 0, R0, c2, c0, 0
@@ -573,15 +613,18 @@ reserved_handler:
 fiq_handler:
 
 reset_handler:
-   ldr PC,=_start
-   B _start
+
 
 
 .section .data 
     value_a: .word 0x000000010
 
 .section .bss
-    value_b: .word
+    tabla_primer_nivel: .space 0x4000
+    tabla_segundo_nivel1: .space 0x400
+    tabla_segundo_nivel2: .space 0x400
+    tabla_segundo_nivel3: .space 0x400
+    
 
 
 .section .stack, "aw", %nobits
