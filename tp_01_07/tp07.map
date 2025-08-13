@@ -43,44 +43,44 @@ reset_vector    0x70000000       0x40 dirección de carga 0x700104c8
                 0x70000040                        __reset_end__ = .
                 0x700104c8                        __reset_LMA = LOADADDR (reset_vector)
 
-.text           0x70030000      0x1b0 dirección de carga 0x70010508
+.text           0x70030000      0x168 dirección de carga 0x70010508
                 0x70030000                        __text_start__ = .
  *(.text*)
  .text          0x70030000        0x0 task1.o
  .text          0x70030000        0x0 task2.o
- .text          0x70030000      0x1b0 tp07.o
-                0x700301b0                        __text_end__ = .
+ .text          0x70030000      0x168 tp07.o
+                0x70030168                        __text_end__ = .
                 0x70010508                        __text_LMA = LOADADDR (.text)
 
-.glue_7         0x700301b0        0x0 dirección de carga 0x700106b8
- .glue_7        0x700301b0        0x0 linker stubs
+.glue_7         0x70030168        0x0 dirección de carga 0x70010670
+ .glue_7        0x70030168        0x0 linker stubs
 
-.glue_7t        0x700301b0        0x0 dirección de carga 0x700106b8
- .glue_7t       0x700301b0        0x0 linker stubs
+.glue_7t        0x70030168        0x0 dirección de carga 0x70010670
+ .glue_7t       0x70030168        0x0 linker stubs
 
-.vfp11_veneer   0x700301b0        0x0 dirección de carga 0x700106b8
- .vfp11_veneer  0x700301b0        0x0 linker stubs
+.vfp11_veneer   0x70030168        0x0 dirección de carga 0x70010670
+ .vfp11_veneer  0x70030168        0x0 linker stubs
 
-.v4_bx          0x700301b0        0x0 dirección de carga 0x700106b8
- .v4_bx         0x700301b0        0x0 linker stubs
+.v4_bx          0x70030168        0x0 dirección de carga 0x70010670
+ .v4_bx         0x70030168        0x0 linker stubs
 
-.iplt           0x700301b0        0x0 dirección de carga 0x700106b8
- .iplt          0x700301b0        0x0 tp07.o
+.iplt           0x70030168        0x0 dirección de carga 0x70010670
+ .iplt          0x70030168        0x0 tp07.o
 
-.data           0x81000000       0x14 dirección de carga 0x700106b8
+.data           0x81000000       0x10 dirección de carga 0x70010670
                 0x81000000                        . = ALIGN (0x4)
                 0x81000000                        __data_start__ = .
  *(.data*)
  .data          0x81000000        0x0 task1.o
  .data          0x81000000        0x0 task2.o
- .data          0x81000000       0x14 tp07.o
-                0x81000004                SP0
-                0x81000008                task
-                0x81000014                        __data_end__ = .
-                0x700106b8                        __data_LMA = LOADADDR (.data)
+ .data          0x81000000       0x10 tp07.o
+                0x81000000                SP0
+                0x81000004                task
+                0x81000010                        __data_end__ = .
+                0x70010670                        __data_LMA = LOADADDR (.data)
 
-.igot.plt       0x81000014        0x0 dirección de carga 0x700106cc
- .igot.plt      0x81000014        0x0 tp07.o
+.igot.plt       0x81000010        0x0 dirección de carga 0x70010680
+ .igot.plt      0x81000010        0x0 tp07.o
 
 .bss            0x82000000     0xc000
                 0x82000000                        . = ALIGN (0x4)
@@ -129,25 +129,25 @@ reset_vector    0x70000000       0x40 dirección de carga 0x700104c8
  .stack         0x70063280        0x0 tp07.o
                 0x70040000                        . = _TASK_INIT
 
-.task_text      0x70040000       0x68 dirección de carga 0x700106cc
+.task_text      0x70040000       0x68 dirección de carga 0x70010680
                 0x70040000                        . = ALIGN (0x4)
                 0x70040000                        __t1_text_start__ = .
  *(.t1_text*)
  .t1_text       0x70040000       0x3c task1.o
                 0x70040000                task1
                 0x7004003c                        __t1_text_end__ = .
-                0x700106cc                        __t1_text_LMA = (LOADADDR (.task_text) + (__t1_text_start__ - ADDR (.task_text)))
+                0x70010680                        __t1_text_LMA = (LOADADDR (.task_text) + (__t1_text_start__ - ADDR (.task_text)))
                 0x7004003c                        __t2_text_start__ = .
  *(.t2_text*)
  .t2_text       0x7004003c       0x2c task2.o
                 0x7004003c                task2
                 0x70040068                        __t2_text_end__ = .
-                0x70010708                        __t2_text_LMA = (LOADADDR (.task_text) + (__t2_text_start__ - ADDR (.task_text)))
+                0x700106bc                        __t2_text_LMA = (LOADADDR (.task_text) + (__t2_text_start__ - ADDR (.task_text)))
 
-.rel.dyn        0x70040068        0x0 dirección de carga 0x70010734
+.rel.dyn        0x70040068        0x0 dirección de carga 0x700106e8
  .rel.iplt      0x70040068        0x0 tp07.o
 
-.task_data      0x700a0000        0x8 dirección de carga 0x70010734
+.task_data      0x700a0000        0x8 dirección de carga 0x700106e8
                 0x700a0000                        __data_task1_start__ = .
  *(.task1_data*)
  .task1_data    0x700a0000        0x4 task1.o
@@ -157,7 +157,7 @@ reset_vector    0x70000000       0x40 dirección de carga 0x700104c8
  .task2_data    0x700a0004        0x4 task2.o
                 0x700a0004                SP2
                 0x700a0008                        __data_task2_end__ = .
-                0x70010734                        __data_task_LMA = LOADADDR (.task_data)
+                0x700106e8                        __data_task_LMA = LOADADDR (.task_data)
 
 .task_bss       0x70100000        0x0
                 0x70100000                        __bss_task1_start__ = .
@@ -169,7 +169,7 @@ reset_vector    0x70000000       0x40 dirección de carga 0x700104c8
  *(.task2_bss*)
                 0x70100000                        __bss_task2_end__ = .
 
-.readarea       0x70a00000        0x0 dirección de carga 0x7001073c
+.readarea       0x70a00000        0x0 dirección de carga 0x700106f0
                 0x70a00000                        . = ALIGN (0x4)
                 0x70a00000                        __readarea_start__ = .
  *(.readarea*)
@@ -189,10 +189,10 @@ LOAD linker stubs
  .ARM.attributes
                 0x00000028       0x18 tp07.o
 
-.debug_line     0x00000000      0x29b
+.debug_line     0x00000000      0x287
  .debug_line    0x00000000       0x44 task1.o
  .debug_line    0x00000044       0x3e task2.o
- .debug_line    0x00000082      0x219 tp07.o
+ .debug_line    0x00000082      0x205 tp07.o
 
 .debug_info     0x00000000       0x6e
  .debug_info    0x00000000       0x26 task1.o

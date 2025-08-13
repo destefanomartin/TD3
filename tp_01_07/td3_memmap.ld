@@ -41,7 +41,7 @@ MEMORY
     task_mem_rom : org = _TASK_INIT, len = 0x1000
     task_data_mem_rom   : org = _DATA_TASK_INIT, len = 8192K 
     task_bss_mem_rom    : org = _BSS_TASK_INIT, len = 0x2000 
-    stack_mem_ram  : org = _PUBLIC_STACK_INIT, len = STACK_SIZE
+    stack_mem_ram  : org = _PUBLIC_STACK_INIT, len = 0x4000
     readarea_mem_ram : org = _READAREA_INIT, len = 128K
 }
 
