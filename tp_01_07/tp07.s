@@ -273,15 +273,15 @@ ciclo_borrado:
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel1 + 0x61*4
-    LDR R1, =STACK_ADDR + 0x32
+    LDR R1, =STACK_ADDR + 0x1032
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel1 + 0x62*4
-    LDR R1, =STACK_ADDR + 0x32
+    LDR R1, =STACK_ADDR + 0x1032
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel1 + 0x63*4
-    LDR R1, =STACK_ADDR + 0x32
+    LDR R1, =STACK_ADDR + 0x1032
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel2 + 0x00*4
@@ -290,11 +290,11 @@ ciclo_borrado:
 
     LDR R0, =tabla_segundo_nivel3 + 0x00*4
     LDR R1, =BSS_KERNEL_ADDR + 0x31
-    STR R1, [R0, #0]
-
-    LDR R0, =tabla_segundo_nivel3 + 0x01*4
-    LDR R1, =BSS_KERNEL_ADDR + 0x31
-    STR R1, [R0, #0]
+    MOV R4, #32    // Cantidad de descriptores.
+ciclo_escritura_descriptores_64KB:
+    STR R1, [R0], #4
+    SUBS R4, #1
+    BNE ciclo_escritura_descriptores_64KB
 
     LDR R0, =tabla_segundo_nivel4 + 0x00*4
     LDR R1, =GICC0_ADDR + 0x32
@@ -339,15 +339,15 @@ ciclo_borrado:
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea1 + 0x61*4
-    LDR R1, =STACK_ADDR + 0x32
+    LDR R1, =STACK_ADDR + 0x1032
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea1 + 0x62*4
-    LDR R1, =STACK_ADDR + 0x32
+    LDR R1, =STACK_ADDR + 0x1032
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea1 + 0x63*4
-    LDR R1, =STACK_ADDR + 0x32
+    LDR R1, =STACK_ADDR + 0x1032
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea1 + 0xA0*4
@@ -550,73 +550,41 @@ irq_handler:
     MOV R1, #1
     STR R1, [R0]
 
-    LDR     R0, =task
-    LDR     R1, [R0]           
-    CMP     R1, #0
+    LDR     R2, =task
+    LDR     R0, [R2]           
+    CMP     R0, #0
     BEQ     run_task1
-    CMP     R1, #1
-    BEQ     run_task2
-    
+    CMP     R0, #1
+    //BEQ     run_task2
 
-run_kernel:
-    BL      loop       
-    B       update_phase
 
 run_task1:
-
-    LDR     R5, =__public_stack_end
-    LDR     SP, [R5]
     LDR     R0, =tabla_primer_nivel_tarea1
     LDR     R3, =__stack_task1_end
     MOV     R5, #1
+    STR     R5, [R2]
+    BL      timer10ms
+    B       change_ttbr0
+
+
+change_ttbr0: 
     MCR     P15, 0, R0, C2, C0, 0
-    ISB
+    MOV     SP, R3
 
-
-    BL      task1
-
-    @ RESTAURAR KERNEL
-    LDR     R2, =tabla_primer_nivelK
-    MCR     P15, 0, R2, C2, C0, 0
-    ISB
-
-    LDR     R3, =__public_stack_end
-    LDR     SP, [R3]
-    B       update_phase
-
-run_task2:
-    LDR     R2, =tabla_primer_nivel_tarea2
-    MCR     P15, 0, R2, C2, C0, 0
-    ISB
-
-    LDR     R3, =__stack_task2_end
-    LDR     SP, [R3]
-
-    BL      task2
-
-    @ RESTAURAR KERNEL
-    LDR     R2, =tabla_primer_nivelK
-    MCR     P15, 0, R2, C2, C0, 0
-    ISB
-
-    LDR     R3, =__public_stack_end
-    LDR     SP, [R3]
-
-update_phase:
-    @ --- INCREMENTAR FASE Y VOLVER A 0 CUANDO LLEGUE A 10 ---
-    LDR     R0, =IRQ_PHASE
-    LDR     R1, [R0]
-    ADD     R1, R1, #1
-    CMP     R1, #10
-    MOVEQ   R1, #0
-    STR     R1, [R0]
-
-    @ ----- EPILOGUE (IRQ) -----
+    POP     {R0}
+    MSR     SPSR, R0
     POP     {R0-R12}
     POP     {LR}
-    ISB 
-    DSB
-    MOVS    PC, LR    
+    MOVS    PC, LR
+
+
+timer10ms: 
+    LDR     R6, =0xF42
+    LDR     R1, =TIMER0_LOAD
+    STR     R6, [R1]
+    BX LR
+
+
 reset_handler: 
     B reset_handler
 
@@ -633,16 +601,16 @@ prefetch_abort_handler:
     B prefetch_abort_handler
 
 data_abort_handler:
-    SUB     lr, lr, #8          // Ajuste típico de LR en aborts
+    SUB     LR, LR, #8          // Ajuste típico de LR en aborts
 
-    MRC     p15, 0, r0, c6, c0, 0   // r0 = DFAR
-    MRC     p15, 0, r1, c5, c0, 0   // r1 = DFSR
+    MRC     p15, 0, R0, c6, c0, 0   // r0 = DFAR
+    MRC     p15, 0, R1, c5, c0, 0   // r1 = DFSR
 
-    LDR     r2, =debug_dfar
-    STR     r0, [r2]
+    LDR     R2, =debug_dfar
+    STR     R0, [R2]
 
-    LDR     r2, =debug_dfsr
-    STR     r1, [r2]
+    LDR     R2, =debug_dfsr
+    STR     R1, [R2]
     B data_abort_handler
 
 reserved_handler: 
@@ -651,7 +619,6 @@ reserved_handler:
 
 
 .section .data 
-    task: .word 0
     SP0: .space 4 
     task: .space 4
     debug_dfar:  .word 0
