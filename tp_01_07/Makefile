@@ -9,7 +9,7 @@ tp07.bin: tp07.elf
 	$(CHAIN)-objcopy -O binary $< $@
 
 
-tp07.elf: tp07.o task1.o task2.o #gic.o move_function.o 
+tp07.elf: tp07.o task1.o task2.o 
 	$(CHAIN)-ld -g -T td3_memmap.ld *.o -o tp07.elf -Map $(LST)tp07.map
 	$(CHAIN)-objdump -D tp07.elf > tp07.lst
 
@@ -22,12 +22,6 @@ task1.o: task1.s
 
 task2.o: task2.s
 	$(CHAIN)-as task2.s -g -o task2.o -a > $(LST)task2.lst
-
-#move_function.o: move_function.c
-#	$(CHAIN)-gcc -g -O0 $(CFLAGS) -c move_function.c -o move_function.o
-
-#gic.o: gic.c
-#	$(CHAIN)-gcc -g -O0 $(CFLAGS) -c gic.c -o gic.o 
 
 exceptions: 
 	$(CHAIN)-as tp07.S -g -Wall -DGEN_EXCEPTION -o tp07.o -a  > $(LST)tp07.lst 

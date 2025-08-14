@@ -26,7 +26,7 @@ error:
     B error
 
 
-.section .task1_data, "wa"
+.section .task1_data, "wa" // Definido para que cree espacio en el stack. 
     .word 0x70A00000
 
 .section .task1_bss, "wa"

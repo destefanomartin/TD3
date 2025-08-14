@@ -14,6 +14,7 @@ ENTRY(_start)
 /* VMA */
 _VECTOR_RESET_INIT = 0x70000000;
 _BOOTLOADER_INIT_ = 0x70010000;
+_SHARED_MEM_INIT_ = 0x70020000;
 _KERNEL_INIT = 0x70030000;
 _DATA_KERNEL_INIT = 0x81000000;
 _BSS_KERNEL_INIT = 0x82000000;
@@ -34,6 +35,7 @@ STACK_SIZE = 0x4000;
 MEMORY
 {
     reset_mem_rom   : org = _VECTOR_RESET_INIT, len = 0x1000
+    shared_mem_rom : org = _SHARED_MEM_INIT_, len = 0x1000
     boot_mem_rom    : org = _BOOTLOADER_INIT_, len = 0x1000
     application_mem_ram : org = _KERNEL_INIT, len = 0x1000
     data_mem_ram : org = _DATA_KERNEL_INIT, len = 0x1000
@@ -179,5 +181,12 @@ SECTIONS
         *(.readarea*)               
         __readarea_end__ = .;
     } > readarea_mem_ram 
+
+    .shared_mem : { 
+        . = ALIGN(4);
+        __shared_mem_start__ = .; 
+        *(shared_mem*)
+        __shared_mem_end__ = .; 
+    } > shared_mem_rom
 
 }

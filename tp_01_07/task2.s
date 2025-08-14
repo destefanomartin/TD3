@@ -21,7 +21,7 @@ loop:
     B task2
 
 
-.section .task2_data, "wa"
+.section .task2_data, "wa" // Definido para que cree espacio en el stack. 
     .word 0x70A10000
     .word 0x70A1FFFF
 

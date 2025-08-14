@@ -39,6 +39,9 @@
 .extern __public_stack_start
 .extern STACK_SIZE
 
+.extern _TASK_INIT
+.extern _SHARED_MEM_INIT_
+
 @ GIC ADDRESS
 .equ GICC0_ADDR, 0x1E000000
 .equ GICD0_ADDR, 0x1E001000
@@ -70,7 +73,6 @@
 .equ tabla_segundo_nivel_tarea1_2, tabla_segundo_nivel_tarea1_1 + 0x400
 .equ tabla_segundo_nivel_tarea1_3, tabla_segundo_nivel_tarea1_2 + 0x400
 .equ tabla_segundo_nivel_tarea1_4, tabla_segundo_nivel_tarea1_3 + 0x400
-.equ tabla_segundo_nivel_tarea1_5, tabla_segundo_nivel_tarea1_4 + 0x400 
 
 .equ tabla_primer_nivel_tarea2, 0x82010000
 .equ tabla_segundo_nivel_tarea2, tabla_primer_nivel_tarea2 + 0x4000
@@ -78,7 +80,6 @@
 .equ tabla_segundo_nivel_tarea2_2, tabla_segundo_nivel_tarea2_1 + 0x400
 .equ tabla_segundo_nivel_tarea2_3, tabla_segundo_nivel_tarea2_2 + 0x400
 .equ tabla_segundo_nivel_tarea2_4, tabla_segundo_nivel_tarea2_3 + 0x400
-.equ tabla_segundo_nivel_tarea2_5, tabla_segundo_nivel_tarea2_4 + 0x400
 
 @ Direcciones fisicas
 
@@ -98,38 +99,12 @@
 .equ READAREA_T2, 0x70A10000
 
 
+
 .equ longitud_tablas, 0x4000*6
 
 
-.section reset_vector, "ax"@progbits 
-    LDR PC, jump_reset         @ 0x00
-    LDR PC, jump_undef_handler      @ 0x04
-    LDR PC, jump_svc_handler        @ 0x08
-    LDR PC, jump_prefetch_abort_handler @ 0x0C
-    LDR PC, jump_data_abort_handler @ 0x10
-    LDR PC, jump_reserved_handler   @ 0x14
-    LDR PC, jump_irq_handler       @ 0x18
-    LDR PC, jump_fiq_handler       @ 0x1C
-    
-jump_reset:
-    .word reset_handler
-jump_undef_handler:
-    .word undef_handler
-jump_svc_handler:
-    .word svc_handler
-jump_prefetch_abort_handler:
-    .word prefetch_abort_handler
-jump_data_abort_handler:
-    .word data_abort_handler
-jump_reserved_handler:
-    .word reserved_handler
-jump_irq_handler:
-    .word irq_handler
-jump_fiq_handler:
-    .word fiq_handler
 
 
-@ Va en inicializacion porque es lo que mueve el codigo para su ejecucion */
 .section boot,"ax"@progbits  
 _start:    
 
@@ -150,7 +125,7 @@ init_regs_loop:
     BNE     init_regs_loop
 
     ADD     R0, R0, #4
-    LDR     R2, =task1
+    LDR     R2, =_TASK_INIT
     STR     R2, [R0]
 
 
@@ -171,7 +146,7 @@ init_regs_loop_t2:
     BNE     init_regs_loop_t2
 
     ADD     R0, R0, #4
-    LDR     R2, =task1
+    LDR     R2, =_TASK_INIT
     STR     R2, [R0]
 
     LDR     R0, =STACK_ADDR + 0x1300
@@ -193,12 +168,6 @@ init_regs_loopk:
     ADD     R0, R0, #4
     LDR     R2, =loop
     STR     R2, [R0]
-
-    
-//inicializo task
-    LDR R1,=task
-    MOV R0,#0
-    STR R0,[R1]
 
 
 
@@ -351,15 +320,19 @@ ciclo_borrado:
     @ Paginacion Kernel - Direcciones Fisicas
 
     LDR R0, =tabla_segundo_nivel1 + 0x10*4
-    LDR R1, =INIT_ADDR + 0x32
+    LDR R1, =INIT_ADDR + 0x12
+    STR R1, [R0, #0]
+
+    LDR R0, =tabla_segundo_nivel1 + 0x20*4
+    LDR R1, =_SHARED_MEM_INIT_ + 0x32
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel1 + 0x30*4
-    LDR R1, =KIDLE_ADDR + 0x32
+    LDR R1, =KIDLE_ADDR + 0xA12
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel1 + 0x00*4
-    LDR R1, =RESET_ADDR + 0x32
+    LDR R1, =RESET_ADDR + 0x212
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel1 + 0x60*4
@@ -383,24 +356,24 @@ ciclo_borrado:
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel3 + 0x00*4
-    LDR R1, =BSS_KERNEL_ADDR + 0x31
+    LDR R1, =BSS_KERNEL_ADDR + 0x11 // RW PL1
     MOV R4, #32    // Cantidad de descriptores.
 ciclo_escritura_descriptores_64KB:
     STR R1, [R0], #4
     SUBS R4, #1
     BNE ciclo_escritura_descriptores_64KB
 
-    LDR R0, =tabla_segundo_nivel4 + 0x00*4
-    LDR R1, =GICC0_ADDR + 0x32
+    LDR R0, =tabla_segundo_nivel4 + 0x00*4 //RW PL1 
+    LDR R1, =GICC0_ADDR + 0x12
     STR R1, [R0, #0]
 
 
-    LDR R0, =tabla_segundo_nivel4 + 0x01*4
-    LDR R1, =GICD0_ADDR + 0x32
+    LDR R0, =tabla_segundo_nivel4 + 0x01*4 //RW PL1 
+    LDR R1, =GICD0_ADDR + 0x12
     STR R1, [R0, #0]
 
-    LDR R0, =tabla_segundo_nivel5 + 0x11*4
-    LDR R1, =TIMER0_BASE + 0x32
+    LDR R0, =tabla_segundo_nivel5 + 0x11*4 //RW PL1 
+    LDR R1, =TIMER0_BASE + 0x12
     STR R1, [R0, #0]
 
 
@@ -418,14 +391,26 @@ ciclo_escritura_descriptores_64KB:
     LDR R1, =tabla_segundo_nivel_tarea1_2 + 1
     STR R1, [R0]
 
+    LDR R0, =tabla_primer_nivel_tarea1 + 0x1E0*4
+    LDR R1, =tabla_segundo_nivel_tarea1_3 + 1
+    STR R1, [R0]
+
+    LDR R0, =tabla_primer_nivel_tarea1 + 0x100*4
+    LDR R1, =tabla_segundo_nivel_tarea1_4 + 1
+    STR R1, [R0]
+
     @ Paginacion Tarea 1 - Direcciones Fisicas
 
     LDR R0, =tabla_segundo_nivel_tarea1 + 0x00*4
-    LDR R1, =RESET_ADDR + 0x32
+    LDR R1, =RESET_ADDR + 0x212
+    STR R1, [R0, #0]
+
+    LDR R0, =tabla_segundo_nivel_tarea1 + 0x20*4
+    LDR R1, =_SHARED_MEM_INIT_ + 0x12
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea1 + 0x40*4
-    LDR R1, =T1_ADDR + 0x32
+    LDR R1, =T1_ADDR + 0xA22
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea1 + 0x60*4
@@ -445,21 +430,35 @@ ciclo_escritura_descriptores_64KB:
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea1 + 0xA0*4
-    LDR R1, =DATA_T1_ADDR + 0x32
+    LDR R1, =DATA_T1_ADDR + 0x832
     STR R1, [R0, #0]
 
 
     LDR R0, =tabla_segundo_nivel_tarea1_1 + 0x00*4
-    LDR R1, =BSS_T1_ADDR + 0x32
+    LDR R1, =BSS_T1_ADDR + 0x832
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea1_2 + 0x00*4
-    LDR R1, =READAREA_T1 + 0x31
+    LDR R1, =READAREA_T1 + 0x831
     MOV R4, #16    // Cantidad de descriptores.
 ciclo_escritura_descriptores_64KB_1:
     STR R1, [R0], #4
     SUBS R4, #1
     BNE ciclo_escritura_descriptores_64KB_1
+
+    LDR R0, =tabla_segundo_nivel_tarea1_3 + 0x00*4
+    LDR R1, =GICC0_ADDR + 0x12
+    STR R1, [R0, #0]
+
+
+    LDR R0, =tabla_segundo_nivel_tarea1_3 + 0x01*4
+    LDR R1, =GICD0_ADDR + 0x12
+    STR R1, [R0, #0]
+
+    LDR R0, =tabla_segundo_nivel_tarea1_4 + 0x11*4
+    LDR R1, =TIMER0_BASE + 0x12
+    STR R1, [R0, #0]
+
 
 
     @ Paginacion Tarea 2
@@ -476,14 +475,26 @@ ciclo_escritura_descriptores_64KB_1:
     LDR R1, =tabla_segundo_nivel_tarea2_2 + 1
     STR R1, [R0]
 
+    LDR R0, =tabla_primer_nivel_tarea2 + 0x1E0*4
+    LDR R1, =tabla_segundo_nivel_tarea2_3 + 1
+    STR R1, [R0]
+
+    LDR R0, =tabla_primer_nivel_tarea2 + 0x100*4
+    LDR R1, =tabla_segundo_nivel_tarea2_4 + 1
+    STR R1, [R0]
+
     @ Paginacion Tarea 2 - Direcciones Fisicas    
 
     LDR R0, =tabla_segundo_nivel_tarea2 + 0x00*4
-    LDR R1, =RESET_ADDR + 0x32
+    LDR R1, =RESET_ADDR + 0x212
     STR R1, [R0, #0]
-    
+
+    LDR R0, =tabla_segundo_nivel_tarea2 + 0x20*4
+    LDR R1, =_SHARED_MEM_INIT_ + 0x12
+    STR R1, [R0, #0]
+
     LDR R0, =tabla_segundo_nivel_tarea2 + 0x40*4
-    LDR R1, =T2_ADDR + 0x32
+    LDR R1, =T2_ADDR + 0xA22
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea2 + 0x60*4
@@ -503,32 +514,47 @@ ciclo_escritura_descriptores_64KB_1:
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea2 + 0xA0*4
-    LDR R1, =DATA_T2_ADDR + 0x32
+    LDR R1, =DATA_T2_ADDR + 0x832
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea2_1 + 0x00*4
-    LDR R1, =BSS_T2_ADDR + 0x32
+    LDR R1, =BSS_T2_ADDR + 0x832
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea2_2 + 0x10*4
-    LDR R1, =READAREA_T2 + 0x31
-    MOV R4, #16    // Cantidad de descriptores.
+    LDR R1, =READAREA_T2 + 0x831
+    MOV R4, #16    
 ciclo_escritura_descriptores_64KB_2:
     STR R1, [R0], #4
     SUBS R4, #1
     BNE ciclo_escritura_descriptores_64KB_2
 
+    LDR R0, =tabla_segundo_nivel_tarea2_3 + 0x00*4
+    LDR R1, =GICC0_ADDR + 0x12
+    STR R1, [R0, #0]
+
+    LDR R0, =tabla_segundo_nivel_tarea2_3 + 0x01*4
+    LDR R1, =GICD0_ADDR + 0x12
+    STR R1, [R0, #0]
+
+    LDR R0, =tabla_segundo_nivel_tarea2_4 + 0x11*4
+    LDR R1, =TIMER0_BASE + 0x12
+    STR R1, [R0, #0]
+
+
+
+
     BL init_vms
 
-    // Habilitar MMU
-    MRC p15, 0,R1, c1, c0, 0    // Leer reg. control.
-    ORR R1, R1, #0x1            // Bit 0 es habilitación de MMU.
-    MCR p15, 0, R1, c1, c0, 0   // Escribir reg. control.    
+  
+    MRC p15, 0,R1, c1, c0, 0    
+    ORR R1, R1, #0x1           
+    MCR p15, 0, R1, c1, c0, 0   
+    ISB  
 
     LDR     R0, =0x70000000  
-    MCR     p15, 0, R0, c12, c0, 0   // Write to VBAR
-    ISB                              // Asegurar sincronización
-
+    MCR     p15, 0, R0, c12, c0, 0   
+    ISB                              
 
     BL init_timer0
 
@@ -550,9 +576,9 @@ init_vms:
     LDR R0, =0x55555555
     MCR p15, 0, R0, c3, c0, 0 @ ok 
 
-    MRC     p15, 0, R0, c1, c0, 0    @ Leer SCTLR
-    ORR     R0, R0, #0x20000000       @ Establecer bit AFE (bit 29)
-    MCR     p15, 0, R0, c1, c0, 0    @ Escribir SCTLR
+    @ MRC     p15, 0, R0, c1, c0, 0    @ Leer SCTLR
+    @ ORR     R0, R0, #0x20000000       @ Establecer bit AFE (bit 29)
+    @ MCR     p15, 0, R0, c1, c0, 0    @ Escribir SCTLR
 
     MRC     p15, 0, R0, c2, c0, 2    @ Leer TTBCR
     ORR     R0, R0, #0x00       
@@ -561,7 +587,14 @@ init_vms:
     LDR R0,= tabla_primer_nivelK
     MCR p15, 0, R0, c2, c0, 0
 
+    MOV   R0, #0
+    MCR   p15, 0, R0, c13, c0, 1    // ContextIDR := 0
+    ISB
     
+    MOV   R0, #0
+    MCR   p15, 0, R0, c8, c7, 0     // TLBIALL (unified)
+    DSB
+    ISB
 
     BX LR 
 
@@ -586,6 +619,35 @@ gic_init:
     STR R1, [R2]
 
     BX LR
+
+
+
+.section reset_vector, "ax"@progbits 
+    LDR PC, jump_reset         @ 0x00
+    LDR PC, jump_undef_handler      @ 0x04
+    LDR PC, jump_svc_handler        @ 0x08
+    LDR PC, jump_prefetch_abort_handler @ 0x0C
+    LDR PC, jump_data_abort_handler @ 0x10
+    LDR PC, jump_reserved_handler   @ 0x14
+    LDR PC, jump_irq_handler       @ 0x18
+    LDR PC, jump_fiq_handler       @ 0x1C
+    
+jump_reset:
+    .word reset_handler
+jump_undef_handler:
+    .word undef_handler
+jump_svc_handler:
+    .word svc_handler
+jump_prefetch_abort_handler:
+    .word prefetch_abort_handler
+jump_data_abort_handler:
+    .word data_abort_handler
+jump_reserved_handler:
+    .word reserved_handler
+jump_irq_handler:
+    .word irq_handler
+jump_fiq_handler:
+    .word fiq_handler
 
 
 init_timer0:
@@ -623,6 +685,7 @@ irq_handler:
     BEQ     run_task2
     LDR     R0, =tabla_primer_nivelK
     LDR     R3, =__public_stack_end
+    MOV     R4, #3
     MOV     R5, #0
     STR     R5, [R2]
     BL      timer80ms
@@ -631,6 +694,7 @@ irq_handler:
 run_task1:
     LDR     R0, =tabla_primer_nivel_tarea1
     LDR     R3, =__stack_task1_end
+    MOV     R4, #1
     MOV     R5, #1
     STR     R5, [R2]
     BL      timer10ms
@@ -638,15 +702,17 @@ run_task1:
 run_task2:
     LDR     R0, =tabla_primer_nivel_tarea2
     LDR     R3, =__stack_task2_end
+    MOV     R4, #2
     MOV     R5, #3
     STR     R5, [R2]
     BL      timer10ms
 
 change_ttbr0: 
+    DSB
     MCR     P15, 0, R0, C2, C0, 0
-    LDR     R0, =0x70000000  
-    MCR     p15, 0, R0, c12, c0, 0   // Write to VBAR
-    ISB                              // Asegurar sincronización
+    ISB
+    MCR     P15, 0, R4, C13, C0, 1
+    ISB                              
     
     MOV     SP, R3
 
@@ -711,12 +777,10 @@ prefetch_abort_handler:
     /* Quedarse en bucle para inspección */
 1:  B       1b
 
-
 data_abort_handler:
-    SUB     LR, LR, #8          // Ajuste típico de LR en aborts
-
-    MRC     p15, 0, R0, c6, c0, 0   // r0 = DFAR
-    MRC     p15, 0, R1, c5, c0, 0   // r1 = DFSR
+    SUB     LR, LR, #8          
+    MRC     p15, 0, R0, c6, c0, 0  
+    MRC     p15, 0, R1, c5, c0, 0   
 
     LDR     R2, =debug_dfar
     STR     R0, [R2]
@@ -731,23 +795,20 @@ reserved_handler:
 
 
 .section .data 
-    SP0: .space 4 
-    task: .space 4
-    SP1: .space 4
     debug_dfar:  .word 0
     debug_dfsr:  .word 0
     .global SP0
-    .global task
     debug_ifar:        .word 0
     debug_ifsr_fs:     .word 0
     debug_ifsr_raw:    .word 0
 
 
-    
+.section .shared_mem, "aw"
+    .global task
+    task: .word 0
 
-.section .bss
 
-    
+.section .bss, "aw", %nobits
 
 
 .section .stack, "aw", %nobits   
