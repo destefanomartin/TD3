@@ -285,7 +285,7 @@ byte_copy6:
 
 
  
-
+paginacion:
 
     LDR R1, =tabla_primer_nivelK
     LDR R2, =longitud_tablas
@@ -328,7 +328,7 @@ ciclo_borrado:
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel1 + 0x30*4
-    LDR R1, =KIDLE_ADDR + 0xA12
+    LDR R1, =KIDLE_ADDR + 0xA22 
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel1 + 0x00*4
