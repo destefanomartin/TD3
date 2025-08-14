@@ -39,7 +39,7 @@ MEMORY
     data_mem_ram : org = _DATA_KERNEL_INIT, len = 0x1000
     bss_mem_ram : org = _BSS_KERNEL_INIT, len = 128K
     task_mem_rom : org = _TASK_INIT, len = 0x1000
-    task_data_mem_rom   : org = _DATA_TASK_INIT, len = 8192K 
+    task_data_mem_rom   : org = _DATA_TASK_INIT, len = 0x1000 
     task_bss_mem_rom    : org = _BSS_TASK_INIT, len = 0x2000 
     stack_mem_ram  : org = _PUBLIC_STACK_INIT, len = 0x4000
     readarea_mem_ram : org = _READAREA_INIT, len = 128K
@@ -110,6 +110,10 @@ SECTIONS
         . = ALIGN(4);
         __stack_undef = .;
 
+        . += 0x80;  
+        . = ALIGN(4); 
+        __stack_sys = .; 
+
         __public_stack_start = .;            
         . = . + TASK_STACK_SIZE;
         __public_stack_end = .;             
@@ -127,31 +131,38 @@ SECTIONS
     } > stack_mem_ram
 
 
-    . = _TASK_INIT; 
-    .task_text : {
-        . = ALIGN(4);
-        __t1_text_start__ = .;
-        *(.t1_text*)
-        __t1_text_end__   = .;
-        __t1_text_LMA     = LOADADDR(.task_text) + (__t1_text_start__ - ADDR(.task_text));
+    .task1_text : AT(0x80010000) {   
+    . = ALIGN(4);
+    __t1_text_start__ = .;
+    *(.t1_text*)
+    __t1_text_end__   = .;
+    } > task_mem_rom
 
+    __t1_text_LMA = LOADADDR(.task1_text); 
+
+    .task2_text : AT(0x80020000) {  
+        . = ALIGN(4); 
         __t2_text_start__ = .;
         *(.t2_text*)
         __t2_text_end__   = .;
-        __t2_text_LMA     = LOADADDR(.task_text) + (__t2_text_start__ - ADDR(.task_text));
-    } > task_mem_rom AT > boot_mem_rom
+    } > task_mem_rom
 
+    __t2_text_LMA = LOADADDR(.task2_text);
 
-    .task_data : { 
+    .task_data : {
+        . = ALIGN(4);
         __data_task1_start__ = .;
-        *(.task1_data*) 
-        __data_task1_end__ = .;
-        *(.task2_data*) 
-        __data_task2_end__ = .;
+        *(.task1_data*)
+        __data_task1_end__   = .;
+        __data_task1_LMA     = LOADADDR(.task_data) + (__data_task1_start__ - ADDR(.task_data));
+        
+        . = ALIGN(4);
+        __data_task2_start__ = .;
+        *(.task2_data*)
+        __data_task2_end__   = .;
+        __data_task2_LMA     = LOADADDR(.task_data) + (__data_task2_start__ - ADDR(.task_data));
+
     } > task_data_mem_rom AT > boot_mem_rom
-
-    __data_task_LMA = LOADADDR(.task_data);
-
 
     .task_bss (NOLOAD): {
         __bss_task1_start__ = .;
@@ -167,6 +178,6 @@ SECTIONS
         __readarea_start__ = .;
         *(.readarea*)               
         __readarea_end__ = .;
-    } > readarea_mem_ram AT > boot_mem_rom
+    } > readarea_mem_ram 
 
 }

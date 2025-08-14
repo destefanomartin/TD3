@@ -91,7 +91,7 @@
 .equ DATA_T1_ADDR, 0x80200000
 .equ DATA_T2_ADDR, 0x80210000 // otros privilegios
 .equ DATA_KERNEL_ADDR, 0x81000000
-.equ BSS_T1_ADDR, 0x8030000 // otros privilegios
+.equ BSS_T1_ADDR, 0x80300000 // otros privilegios
 .equ BSS_T2_ADDR, 0x80310000 // otros privilegios
 .equ BSS_KERNEL_ADDR, 0x82000000
 .equ READAREA_T1, 0x70A00000
@@ -133,9 +133,73 @@ jump_fiq_handler:
 .section boot,"ax"@progbits  
 _start:    
 
-//inicializo SP0
-    LDR R0,=_PUBLIC_STACK_INIT
-    LDR R1,=STACK_SIZE
+    LDR     R0, =STACK_ADDR + 0x2300  
+    
+    // SPSR inicial
+    ADD     R0, R0, #4
+    MOV     R2, #0x10               
+    STR     R2, [R0]
+
+ 
+    MOV     R2, #0
+    MOV     R3, #12             
+init_regs_loop:
+    ADD     R0, R0, #4
+    STR     R2, [R0]
+    SUBS    R3, R3, #1
+    BNE     init_regs_loop
+
+    ADD     R0, R0, #4
+    LDR     R2, =task1
+    STR     R2, [R0]
+
+
+    LDR     R0, =STACK_ADDR + 0x3300  
+    
+    // SPSR inicial
+    ADD     R0, R0, #4
+    MOV     R2, #0x10               
+    STR     R2, [R0]
+
+ 
+    MOV     R2, #0
+    MOV     R3, #12             
+init_regs_loop_t2:
+    ADD     R0, R0, #4
+    STR     R2, [R0]
+    SUBS    R3, R3, #1
+    BNE     init_regs_loop_t2
+
+    ADD     R0, R0, #4
+    LDR     R2, =task1
+    STR     R2, [R0]
+
+    LDR     R0, =STACK_ADDR + 0x1300
+    
+    // SPSR inicial
+    ADD     R0, R0, #4
+    MOV     R2, #0x10               
+    STR     R2, [R0]
+
+ 
+    MOV     R2, #0
+    MOV     R3, #12             
+init_regs_loopk:
+    ADD     R0, R0, #4
+    STR     R2, [R0]
+    SUBS    R3, R3, #1
+    BNE     init_regs_loopk
+
+    ADD     R0, R0, #4
+    LDR     R2, =loop
+    STR     R2, [R0]
+
+    
+//inicializo task
+    LDR R1,=task
+    MOV R0,#0
+    STR R0,[R1]
+
 
 
 
@@ -161,7 +225,7 @@ _start:
 
     @ Luego pasar a modo SYS o modo de aplicación
     CPS #0x1F            @ Cambiar a modo SYS 
-    LDR SP, =_PUBLIC_STACK_INIT
+    LDR SP, =__stack_sys
 reset_copy: 
     LDR R0, =__reset_start__   @ destino
     LDR R1, =__reset_LMA     @ origen
@@ -224,6 +288,36 @@ byte_copy4:
     SUBS R2, R2, #1
     BNE byte_copy4// Verifica flag
 
+data_task1_copy: 
+    LDR R0, =DATA_T1_ADDR   @ destino
+    LDR R1, =__data_task1_LMA      @ origen
+    LDR R2, =__data_task1_end__
+    LDR R3, =__data_task1_start__
+    SUB R2, R2, R3            @ tamaño de la copia
+
+byte_copy5:
+    LDRB R4, [R1], #1
+    STRB R4, [R0], #1
+    SUBS R2, R2, #1
+    BNE byte_copy5// Verifica flag
+
+data_task2_copy: 
+    LDR R0, =DATA_T2_ADDR   @ destino
+    LDR R1, =__data_task2_LMA      @ origen
+    LDR R2, =__data_task2_end__
+    LDR R3, =__data_task2_start__
+    SUB R2, R2, R3            @ tamaño de la copia
+
+byte_copy6:
+    LDRB R4, [R1], #1
+    STRB R4, [R0], #1
+    SUBS R2, R2, #1
+    BNE byte_copy6// Verifica flag
+
+
+ 
+
+
     LDR R1, =tabla_primer_nivelK
     LDR R2, =longitud_tablas
     MOV R0, #0
@@ -277,11 +371,11 @@ ciclo_borrado:
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel1 + 0x62*4
-    LDR R1, =STACK_ADDR + 0x1032
+    LDR R1, =STACK_ADDR + 0x2032
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel1 + 0x63*4
-    LDR R1, =STACK_ADDR + 0x1032
+    LDR R1, =STACK_ADDR + 0x3032
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel2 + 0x00*4
@@ -343,11 +437,11 @@ ciclo_escritura_descriptores_64KB:
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea1 + 0x62*4
-    LDR R1, =STACK_ADDR + 0x1032
+    LDR R1, =STACK_ADDR + 0x2032
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea1 + 0x63*4
-    LDR R1, =STACK_ADDR + 0x1032
+    LDR R1, =STACK_ADDR + 0x3032
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea1 + 0xA0*4
@@ -397,15 +491,15 @@ ciclo_escritura_descriptores_64KB_1:
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea2 + 0x61*4
-    LDR R1, =STACK_ADDR + 0x32
+    LDR R1, =STACK_ADDR + 0x1032
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea2 + 0x62*4
-    LDR R1, =STACK_ADDR + 0x32
+    LDR R1, =STACK_ADDR + 0x2032
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea2 + 0x63*4
-    LDR R1, =STACK_ADDR + 0x32
+    LDR R1, =STACK_ADDR + 0x3032
     STR R1, [R0, #0]
 
     LDR R0, =tabla_segundo_nivel_tarea2 + 0xA0*4
@@ -416,7 +510,7 @@ ciclo_escritura_descriptores_64KB_1:
     LDR R1, =BSS_T2_ADDR + 0x32
     STR R1, [R0, #0]
 
-    LDR R0, =tabla_segundo_nivel_tarea2_2 + 0x01*4
+    LDR R0, =tabla_segundo_nivel_tarea2_2 + 0x10*4
     LDR R1, =READAREA_T2 + 0x31
     MOV R4, #16    // Cantidad de descriptores.
 ciclo_escritura_descriptores_64KB_2:
@@ -434,15 +528,6 @@ ciclo_escritura_descriptores_64KB_2:
     LDR     R0, =0x70000000  
     MCR     p15, 0, R0, c12, c0, 0   // Write to VBAR
     ISB                              // Asegurar sincronización
-
-    MRC     p15, 0, R0, c2, c0, 0     @ Leer TTBR0
-    LDR     R1, =0x70060100
-    LSR     R2, R1, #20               @ índice 1er nivel
-    LSL     R2, R2, #2                 @ multiplicar por tamaño de entrada
-    ADD     R0, R0, R2                 @ dirección de la entrada
-    LDR     R3, [R0]                   @ leer entrada
-
-
 
 
     BL init_timer0
@@ -519,26 +604,6 @@ init_timer0:
 
     BX      LR
 
-error_init:
-    B error_init
-
-@ irq_handler:
-
-@     @ SUB LR, LR, #4
-@     @ PUSH {R0-R12, LR}   
-@     @ MRS R0, SPSR
-@     @ PUSH {R0}                         
-@     @ LDR R0, =TIMER0_INTCLR
-@     @ MOV R1, #1
-@     @ STR R1, [R0]
-
-
-
-@     @ //LDR R1, =task_order
-@     @ CMP R1, #0 
-@     @ BEQ task1
-@     @ CMP R1, #1
-@     @ BEQ task2
 irq_handler:
     SUB     LR, LR, #4
     PUSH    {LR}
@@ -555,8 +620,13 @@ irq_handler:
     CMP     R0, #0
     BEQ     run_task1
     CMP     R0, #1
-    //BEQ     run_task2
-
+    BEQ     run_task2
+    LDR     R0, =tabla_primer_nivelK
+    LDR     R3, =__public_stack_end
+    MOV     R5, #0
+    STR     R5, [R2]
+    BL      timer80ms
+    B       change_ttbr0
 
 run_task1:
     LDR     R0, =tabla_primer_nivel_tarea1
@@ -565,24 +635,41 @@ run_task1:
     STR     R5, [R2]
     BL      timer10ms
     B       change_ttbr0
-
+run_task2:
+    LDR     R0, =tabla_primer_nivel_tarea2
+    LDR     R3, =__stack_task2_end
+    MOV     R5, #3
+    STR     R5, [R2]
+    BL      timer10ms
 
 change_ttbr0: 
     MCR     P15, 0, R0, C2, C0, 0
+    LDR     R0, =0x70000000  
+    MCR     p15, 0, R0, c12, c0, 0   // Write to VBAR
+    ISB                              // Asegurar sincronización
+    
     MOV     SP, R3
 
-    POP     {R0}
-    MSR     SPSR, R0
-    POP     {R0-R12}
-    POP     {LR}
-    MOVS    PC, LR
+    POP {R0}
+    MSR SPSR,R0
+    POP {R0-R12}
+    POP {LR}
+    DSB
+    ISB    
+    MOVS PC,LR 
 
 
 timer10ms: 
     LDR     R6, =0xF42
     LDR     R1, =TIMER0_LOAD
     STR     R6, [R1]
-    BX LR
+    BX      LR
+
+timer80ms: 
+    LDR     R6, =0x7A12
+    LDR     R1, =TIMER0_LOAD
+    STR     R6, [R1]
+    BX      LR
 
 
 reset_handler: 
@@ -598,7 +685,32 @@ svc_handler:
     B svc_handler
 
 prefetch_abort_handler: 
-    B prefetch_abort_handler
+    /* IFAR = Instruction Fault Address Register */
+    MRC     p15, 0, R0, c6, c0, 2    @ R0 = IFAR (VA que falló)
+
+    /* IFSR = Instruction Fault Status Register */
+    MRC     p15, 0, R1, c5, c0, 1    @ R1 = IFSR
+
+    /* FS compacto = (IFSR[10] << 4) | IFSR[3:0] */
+    AND     R2, R1, #0xF             @ low4 = IFSR[3:0]
+    MOV     R3, R1, LSR #10
+    AND     R3, R3, #1               @ bit10
+    LSL     R3, R3, #4               @ bit10 << 4
+    ORR     R2, R2, R3               @ R2 = FS
+
+    /* Volcar resultados a variables visibles */
+    LDR     R4, =debug_ifar
+    STR     R0, [R4]
+    LDR     R4, =debug_ifsr_fs
+    STR     R2, [R4]
+
+    /* Opcional: también guardar IFSR raw (si querés más info) */
+    LDR     R4, =debug_ifsr_raw
+    STR     R1, [R4]
+
+    /* Quedarse en bucle para inspección */
+1:  B       1b
+
 
 data_abort_handler:
     SUB     LR, LR, #8          // Ajuste típico de LR en aborts
@@ -621,18 +733,20 @@ reserved_handler:
 .section .data 
     SP0: .space 4 
     task: .space 4
+    SP1: .space 4
     debug_dfar:  .word 0
     debug_dfsr:  .word 0
     .global SP0
     .global task
+    debug_ifar:        .word 0
+    debug_ifsr_fs:     .word 0
+    debug_ifsr_raw:    .word 0
 
 
     
 
 .section .bss
-    tabla_primer_nivel_tarea1: .space 16384
-    tabla_primer_nivel_tarea2: .space 16384
-    tabla_primer_nivelK: .space 16384
+
     
 
 
