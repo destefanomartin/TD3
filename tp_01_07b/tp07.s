@@ -110,7 +110,8 @@ _start:
 
     LDR     R0, =STACK_ADDR + 0x2300  
     
-    // SPSR inicial
+    // Preparo pilas 
+    
     ADD     R0, R0, #4
     MOV     R2, #0x10               
     STR     R2, [R0]
@@ -131,7 +132,6 @@ init_regs_loop:
 
     LDR     R0, =STACK_ADDR + 0x3300  
     
-    // SPSR inicial
     ADD     R0, R0, #4
     MOV     R2, #0x10               
     STR     R2, [R0]
@@ -195,95 +195,71 @@ init_regs_loopk:
     @ Luego pasar a modo SYS o modo de aplicación
     CPS #0x1F            @ Cambiar a modo SYS 
     LDR SP, =__stack_sys
-reset_copy: 
-    LDR R0, =__reset_start__   @ destino
-    LDR R1, =__reset_LMA     @ origen
+
+
+
+    LDR R0, =__reset_start__
+    LDR R1, =__reset_LMA
     LDR R2, =__reset_end__
-    SUB R2, R2, R0           @ tamaño de la copia
+    SUB R2, R2, R0
+    BL copy_section
 
-byte_copy:
-    LDRB R3, [R1], #1
-    STRB R3, [R0], #1
-    SUBS R2, R2, #1
-    BNE byte_copy// Verifica flag 
-
-data_copy: 
-    LDR R0, =__data_start__    @ destino
-    LDR R1, =__data_LMA       @ origen
+ 
+    LDR R0, =__data_start__
+    LDR R1, =__data_LMA
     LDR R2, =__data_end__
-    SUB R2, R2, R0            @ tamaño de la copia
+    SUB R2, R2, R0
+    BL copy_section
 
-byte_copy1:
-    LDRB R3, [R1], #1
-    STRB R3, [R0], #1
-    SUBS R2, R2, #1
-    BNE byte_copy1// Verifica flag 
 
-text_copy:
-    LDR R0, =__text_start__    @ destino
-    LDR R1, =__text_LMA       @ origen
+    LDR R0, =__text_start__
+    LDR R1, =__text_LMA
     LDR R2, =__text_end__
-    SUB R2, R2, R0            @ tamaño de la copia
+    SUB R2, R2, R0
+    BL copy_section
 
-byte_copy2:
-    LDRB R3, [R1], #1
-    STRB R3, [R0], #1
-    SUBS R2, R2, #1
-    BNE byte_copy2// Verifica flag 
-    
-task1_copy: 
-    LDR R0, =T1_ADDR    @ destino
-    LDR R1, =__t1_text_LMA       @ origen
+
+    LDR R0, =T1_ADDR
+    LDR R1, =__t1_text_LMA
     LDR R2, =__t1_text_end__
     LDR R3, =__t1_text_start__
-    SUB R2, R2, R3            @ tamaño de la copia
+    SUB R2, R2, R3
+    BL copy_section
 
-byte_copy3:
-    LDRB R4, [R1], #1
-    STRB R4, [R0], #1
-    SUBS R2, R2, #1
-    BNE byte_copy3// Verifica flag 
 
-task2_copy: 
-    LDR R0, =T2_ADDR   @ destino
-    LDR R1, =__t2_text_LMA       @ origen
+    LDR R0, =T2_ADDR
+    LDR R1, =__t2_text_LMA
     LDR R2, =__t2_text_end__
     LDR R3, =__t2_text_start__
-    SUB R2, R2, R3            @ tamaño de la copia
+    SUB R2, R2, R3
+    BL copy_section
 
-byte_copy4:
-    LDRB R4, [R1], #1
-    STRB R4, [R0], #1
-    SUBS R2, R2, #1
-    BNE byte_copy4// Verifica flag
 
-data_task1_copy: 
-    LDR R0, =DATA_T1_ADDR   @ destino
-    LDR R1, =__data_task1_LMA      @ origen
+    LDR R0, =DATA_T1_ADDR
+    LDR R1, =__data_task1_LMA
     LDR R2, =__data_task1_end__
     LDR R3, =__data_task1_start__
-    SUB R2, R2, R3            @ tamaño de la copia
+    SUB R2, R2, R3
+    BL copy_section
 
-byte_copy5:
-    LDRB R4, [R1], #1
-    STRB R4, [R0], #1
-    SUBS R2, R2, #1
-    BNE byte_copy5// Verifica flag
 
-data_task2_copy: 
-    LDR R0, =DATA_T2_ADDR   @ destino
-    LDR R1, =__data_task2_LMA      @ origen
+    LDR R0, =DATA_T2_ADDR
+    LDR R1, =__data_task2_LMA
     LDR R2, =__data_task2_end__
     LDR R3, =__data_task2_start__
-    SUB R2, R2, R3            @ tamaño de la copia
+    SUB R2, R2, R3
+    BL copy_section
 
-byte_copy6:
-    LDRB R4, [R1], #1
-    STRB R4, [R0], #1
-    SUBS R2, R2, #1
-    BNE byte_copy6// Verifica flag
-
-
+copy_section:
+    CMP     R2, #0
+    BEQ     copy_done
+copy_loop:
+    LDRB    R3, [R1], #1
+    STRB    R3, [R0], #1
+    SUBS    R2, R2, #1
+    BNE     copy_loop
+copy_done:
+    BX      LR
  
 paginacion:
 
@@ -440,7 +416,7 @@ ciclo_escritura_descriptores_64KB:
 
     LDR R0, =tabla_segundo_nivel_tarea1_2 + 0x00*4
     LDR R1, =READAREA_T1 + 0x831
-    MOV R4, #16    // Cantidad de descriptores.
+    MOV R4, #16    
 ciclo_escritura_descriptores_64KB_1:
     STR R1, [R0], #4
     SUBS R4, #1
@@ -542,11 +518,9 @@ ciclo_escritura_descriptores_64KB_2:
     STR R1, [R0, #0]
 
 
-
-
     BL init_vms
 
-  
+  // Activo MMU
     MRC p15, 0,R1, c1, c0, 0    
     ORR R1, R1, #0x1           
     MCR p15, 0, R1, c1, c0, 0   
@@ -576,6 +550,7 @@ init_vms:
     LDR R0, =0x55555555
     MCR p15, 0, R0, c3, c0, 0 @ ok 
 
+// Bit AFE = 0 para usar tabla permisos AP
     @ MRC     p15, 0, R0, c1, c0, 0    @ Leer SCTLR
     @ ORR     R0, R0, #0x20000000       @ Establecer bit AFE (bit 29)
     @ MCR     p15, 0, R0, c1, c0, 0    @ Escribir SCTLR
@@ -620,7 +595,21 @@ gic_init:
 
     BX LR
 
+init_timer0:
+    LDR     R0, =0xF42
+    LDR     R1, =TIMER0_LOAD
+    STR     R0, [R1]
 
+    LDR     R1, =TIMER0_CTRL
+    MOV     R0, #0xEA
+    STR     R0, [R1]
+
+
+    LDR     R1, =TIMER0_INTCLR
+    MOV     R0, #1
+    STR     R0, [R1]
+
+    BX      LR
 
 .section reset_vector, "ax"@progbits 
     LDR PC, jump_reset         @ 0x00
@@ -650,21 +639,7 @@ jump_fiq_handler:
     .word fiq_handler
 
 
-init_timer0:
-    LDR     R0, =0xF42
-    LDR     R1, =TIMER0_LOAD
-    STR     R0, [R1]
 
-    LDR     R1, =TIMER0_CTRL
-    MOV     R0, #0xEA
-    STR     R0, [R1]
-
-
-    LDR     R1, =TIMER0_INTCLR
-    MOV     R0, #1
-    STR     R0, [R1]
-
-    BX      LR
 
 irq_handler:
     SUB     LR, LR, #4
@@ -676,7 +651,7 @@ irq_handler:
     LDR R0, =TIMER0_INTCLR
     MOV R1, #1
     STR R1, [R0]
-
+// Selecciono siguiente tarea
     LDR     R2, =task
     LDR     R0, [R2]           
     CMP     R0, #0
@@ -751,31 +726,25 @@ svc_handler:
     B svc_handler
 
 prefetch_abort_handler: 
-    /* IFAR = Instruction Fault Address Register */
     MRC     p15, 0, R0, c6, c0, 2    @ R0 = IFAR (VA que falló)
 
-    /* IFSR = Instruction Fault Status Register */
     MRC     p15, 0, R1, c5, c0, 1    @ R1 = IFSR
 
-    /* FS compacto = (IFSR[10] << 4) | IFSR[3:0] */
-    AND     R2, R1, #0xF             @ low4 = IFSR[3:0]
+    AND     R2, R1, #0xF             
     MOV     R3, R1, LSR #10
-    AND     R3, R3, #1               @ bit10
-    LSL     R3, R3, #4               @ bit10 << 4
-    ORR     R2, R2, R3               @ R2 = FS
+    AND     R3, R3, #1              
+    LSL     R3, R3, #4               
+    ORR     R2, R2, R3               
 
-    /* Volcar resultados a variables visibles */
     LDR     R4, =debug_ifar
     STR     R0, [R4]
     LDR     R4, =debug_ifsr_fs
     STR     R2, [R4]
 
-    /* Opcional: también guardar IFSR raw (si querés más info) */
     LDR     R4, =debug_ifsr_raw
     STR     R1, [R4]
 
-    /* Quedarse en bucle para inspección */
-1:  B       1b
+handler_loop:  B       handler_loop
 
 data_abort_handler:
     SUB     LR, LR, #8          
@@ -797,7 +766,6 @@ reserved_handler:
 .section .data 
     debug_dfar:  .word 0
     debug_dfsr:  .word 0
-    .global SP0
     debug_ifar:        .word 0
     debug_ifsr_fs:     .word 0
     debug_ifsr_raw:    .word 0

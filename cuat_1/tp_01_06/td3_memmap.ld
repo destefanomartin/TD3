@@ -72,23 +72,27 @@ SECTIONS
     __data_LMA = LOADADDR(.data);
     
     .stack : {
-        . = ALIGN(8);
-        __stack_start = .;
-
+     __stack_start__ = .;
+        . += 0x80;
+        . = ALIGN(4);
         __stack_irq = .;
-        . = . + 0x80;
 
+        . += 0x80;
+        . = ALIGN(4);
         __stack_fiq = .;
-        . = . + 0x80;
 
-        __stack_abt = .;
-        . = . + 0x80;
-
-        __stack_undef = .;
-        . = . + 0x80;      
-
+        . += 0x80;
+        . = ALIGN(4);
         __stack_svc = .;
-        . = . + 0x80;      
+
+        . += 0x80;
+        . = ALIGN(4);
+        __stack_abt = .;
+
+        . += 0x80;
+        . = ALIGN(4);
+        __stack_undef = .;
+ 
 
         __stack_bottom = .;
     } > stack_mem_ram 

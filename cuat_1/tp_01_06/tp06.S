@@ -25,7 +25,7 @@
 @ STACK
 .extern __stack_undef
 .extern __stack_svc
-.extern __stack_app
+.extern _PUBLIC_STACK_INIT
 
 
 
@@ -41,6 +41,26 @@
 .equ TIMER0_INTCLR,    TIMER0_BASE + 0x0C
 .equ TIMER0_MIS,       TIMER0_BASE + 0x14
 .equ TIMER0_IRQ_ID,    36
+
+
+@ PAGINACION 
+
+.equ tabla_primer_nivel, 0x70024000
+.equ tabla_segundo_nivel1, 0x70022000
+.equ tabla_segundo_nivel2, 0x70022400
+.equ tabla_segundo_nivel3, 0x70022800
+.equ DIR_FISICA1, 0x70031000
+.equ DIR_FISICA2, 0x70030000
+.equ DIR_FISICA3, 0x70022000
+.equ DIR_FISICA4, 0x70020000
+.equ DIR_FISICA5, 0x70010000
+.equ DIR_FISICA6, 0x00000000
+.equ DIR_FISICA7, GICC0_ADDR
+.equ DIR_FISICA8, GICD0_ADDR
+.equ DIR_FISICA9, TIMER0_BASE
+.equ DIR_FISICA10, 0x70021000 // otros privilegios
+
+.equ longitud_tablas, tabla_primer_nivel + 0x4000 - tabla_segundo_nivel3
 
 
 
@@ -74,6 +94,7 @@ jump_fiq_handler:
 .section boot,"ax"@progbits  
 _start:
 
+
     @ Configurar pila para modo UNDEF
     CPS #0x1B            @ Cambiar a modo UNDEF
     LDR SP, =__stack_undef
@@ -96,10 +117,9 @@ _start:
 
     @ Luego pasar a modo SYS o modo de aplicación
     CPS #0x1F            @ Cambiar a modo SYS 
-    LDR SP, =__stack_app @ (si usás una pila para app)
+    LDR SP, =_PUBLIC_STACK_INIT
 
-
-
+    
 reset_copy: 
     LDR R0, =__reset_start   @ destino
     LDR R1, =__reset_LMA     @ origen
@@ -135,26 +155,108 @@ byte_copy2:
     STRB R3, [R0], #1
     SUBS R2, R2, #1
     BNE byte_copy2// Verifica flag 
+    
+
+    @ Inicio paginacion 
+
+paginacion:
+
+// Borrar las tablas de paginación.
+    LDR R1, =tabla_primer_nivel
+    LDR R2, =longitud_tablas
+    MOV R0, #0
+ciclo_borrado:
+    STRB R0, [R1], #1
+    SUBS R2, #1
+    BNE ciclo_borrado
+
+// Índice 0x700 apunta a tabla de páginas.
+    LDR R0, =tabla_primer_nivel + 0x700*4
+    LDR R1, =tabla_segundo_nivel1 + 1
+    STR R1, [R0]
+
+    LDR R0, =tabla_primer_nivel + 0x1E0*4
+    LDR R1, =tabla_segundo_nivel2 + 1
+    STR R1, [R0]
+
+    LDR R0, =tabla_primer_nivel + 0x100*4
+    LDR R1, =tabla_segundo_nivel3 + 1
+    STR R1, [R0]
+
+
+// Segundo nivel
+
+    LDR R0, =tabla_segundo_nivel1 + 0x31*4
+    LDR R1, =DIR_FISICA1 + 0x12
+    STR R1, [R0, #0]
+
+    LDR R0, =tabla_segundo_nivel1 + 0x30*4
+    LDR R1, =DIR_FISICA2 + 0x12
+    STR R1, [R0, #0]
+
+    LDR R0, =tabla_segundo_nivel1 + 0x22*4
+    LDR R1, =DIR_FISICA3 + 0x12
+    STR R1, [R0, #0]
+
+
+    LDR R0, =tabla_segundo_nivel1 + 0x20*4
+    LDR R1, =DIR_FISICA4 + 0x12
+    STR R1, [R0, #0]
+
+    LDR R0, =tabla_segundo_nivel1 + 0x10*4
+    LDR R1, =DIR_FISICA5 + 0x12
+    STR R1, [R0, #0]
+
+
+    LDR R0, =tabla_segundo_nivel1 + 0x00*4
+    LDR R1, =DIR_FISICA6 + 0x12
+    STR R1, [R0, #0]
+
+    LDR R0, =tabla_segundo_nivel2 + 0x00*4
+    LDR R1, =DIR_FISICA7 + 0x12
+    STR R1, [R0, #0]
+
+    LDR R0, =tabla_segundo_nivel2 + 0x01*4
+    LDR R1, =DIR_FISICA8 + 0x12
+    STR R1, [R0, #0]
+
+    LDR R0, =tabla_segundo_nivel3 + 0x11*4
+    LDR R1, =DIR_FISICA9 + 0x12
+    STR R1, [R0, #0]      
+
+    LDR R0, =tabla_segundo_nivel1 + 0x21*4
+    LDR R1, =DIR_FISICA10 + 0x12
+    STR R1, [R0, #0]      
+
+    @ Fin inicialización de tablas de paginación
+
+    BL init_vms
+
+    // Habilitar MMU
+    MRC p15, 0,R1, c1, c0, 0    // Leer reg. control.
+    ORR R1, R1, #0x1            // Bit 0 es habilitación de MMU.
+    MCR p15, 0, R1, c1, c0, 0   // Escribir reg. control.    
+
+    LDR     R0, =0x70000000  
+    MCR     p15, 0, R0, c12, c0, 0   // Write to VBAR
+    ISB                              // Asegurar sincronización
 
     LDR R4, =code
     BLX R4
+
     
  
 
 .section .text @ Donde va la aplicacion 
 code:
-    MOV R10, #0x00
 
-    SWI 0
-
-    MOV R0, #0x04
-
-    SWI 1
 
     MOV R0, #0x02
 
-    BL init_timer0
+    BL make_inv_exception     @ Llama a función que genera instrucción inválida
 
+
+    BL init_timer0
 
     @ Esto seria con codigo en C
     @ LDR R10, =__gic_init
@@ -170,16 +272,11 @@ code:
     @ .global conditional
 
     @ conditional:
-    @ BL make_inv_exception     @ Llama a función que genera instrucción inválida
 
     @ @ BL make_mem_exception     @ Llama a función que genera acceso inválido (No funciona sin MMU)
     @ #endif 
 
     CPSIE i
-
-
-
-    MOV R0, #0x02
 
     BL loop
 
@@ -190,6 +287,27 @@ loop:
     WFI
     B loop
 
+
+
+init_vms: 
+
+    LDR R0, =0x55555555
+    MCR p15, 0, R0, c3, c0, 0 @ ok 
+
+    MRC p15, 0, R0, c1, c0, 0    @ Leer SCTLR
+    ORR R0, R0, #0x20000000       @ Establecer bit AFE (bit 29)
+    MCR p15, 0, R0, c1, c0, 0    @ Escribir SCTLR
+
+    MRC p15, 0, R0, c2, c0, 2    @ Leer TTBCR
+    ORR R0, R0, #0x00
+    MCR p15, 0, R0, c2, c0, 2    @ Escribir TTBCR
+
+    LDR R0,= tabla_primer_nivel
+    MCR p15, 0, R0, c2, c0, 0
+
+    
+
+    BX LR 
 
 gic_init: 
 
@@ -203,10 +321,9 @@ gic_init:
     STR R3, [R2, #0x104]
 
     @ Asignar prioridad maxima IRQ 36
-    MOV R3, #0x00
-    LDR R1, =0x424              // 0x400 + 36 
-    STRB R3, [R2, R1]
-
+    @ MOV R3, #0x00
+    @ LDR R1, =0x424              // 0x400 + 36 
+    @ STRB R3, [R2, R1]
 
     MOV R1, #0x01
     STR R1, [R0]
@@ -247,10 +364,11 @@ init_timer0:
 
 
 irq_handler:
-    SUB LR, LR, #4
-    PUSH {R0-R3, LR}
+    SUB     LR, LR, #4
+    PUSH    {LR}
+    PUSH    {R0-R12}
 
-    @ Comprobacion que fue el TIMER 
+    //
     LDR R0, =TIMER0_MIS      
     LDR R1, [R0]             
     CMP R1, #1               
@@ -258,7 +376,7 @@ irq_handler:
 
     ADD R10, R10, #1
 
-    @ Limpiar la interrupción (acknowledge)
+    @ Limpiar la interrupción 
     LDR R0, =TIMER0_INTCLR
     MOV R1, #1
     STR R1, [R0]
@@ -269,35 +387,44 @@ not_timer_irq:
     
 
 undef_handler:
-    @ SUB LR, LR, #4              @ Volver a la instrucción que causó el error
+    @ SUB LR, LR, #4             
     PUSH {R0-R9, LR}
     /* Codigo de ejercicio anterior 
     MOV R1, LR                  @ Dirección donde ocurrió el error
     LDR R2, =0x00000000         @ Código de operación del andeq r0, r0, r0
-   
     STR R2, [R1]                @ Sobrescribe la instrucción 
-     */
     /* Ejercicio 5 */
     LDR R10, =0x494E56        @ "INV" en ASCII
-    POP {R0-R9, LR} @ Retorno de la excepcion
-    @SUBS LR, LR, #8 @ Volver a la instrucción SIGUIENTE a la que causo el fallo
+    POP {R0-R9, LR}
+    @SUBS LR, LR, #8 
     MOVS PC, LR
 
 data_abort_handler:
-    PUSH {R0-R12, LR}
-    LDR R10, =0x4D454D        @ "MEM" en ASCII
-    POP {R0-R12, LR}            @ Retorno de la excepcion
-    SUB LR, LR, #8            @ Volver a instrucción siguiente
-    MOVS PC, LR               
+    // Codigo ej. anterior
+    @ PUSH {R0-R12, LR}
+    @ LDR R10, =0x4D454D        @ "MEM" en ASCII
+    @ POP {R0-R12, LR}            @ Retorno de la excepcion
+    @ SUB LR, LR, #8            @ Volver a instrucción siguiente
+    @ MOVS PC, LR               
+    // Info del data abort: 
+    SUB     LR, LR, #8          
+    MRC     p15, 0, R0, c6, c0, 0  
+    MRC     p15, 0, R1, c5, c0, 0   
 
+    LDR     R2, =debug_dfar
+    STR     R0, [R2]
+
+    LDR     R2, =debug_dfsr
+    STR     R1, [R2]
+    B data_abort_handler
 
 
 svc_handler:
-    PUSH {R2-R12, LR}          @ Guardar registros menos con los que retornamos
-    SUB LR, LR, #4             @ Volver a la instrucción SVC
-    LDR R0, [LR]               @ Carga la instrucción SVC completa (32 bits)
+    PUSH {R2-R12, LR}          
+    SUB LR, LR, #4             
+    LDR R0, [LR]               
     BIC R1, R0, #0xFF000000    
-    AND R1, R1, #0xFF          @ Extrae el número del SVC (último byte)
+    AND R1, R1, #0xFF          @ Extrae ultimo byte (svc number)
     CMP R1, #0
     BEQ suma
     CMP R1, #1
@@ -319,38 +446,41 @@ resta:
     MOV R1, #1              
     MOV R2, #1              
     MOV R3, #0              
-    SUBS R0, R0, R2     @ actualiza flags (incluye borrow)
+    SUBS R0, R0, R2     
     SBC  R1, R1, R3     
     B end_svc
 
 end_svc:
-    POP {R2-R12, LR}            @ Restaurar registros menos con los que retornamos
-    MOVS PC, LR                @ Regreso del handler
+    POP {R2-R12, LR}           
+    MOVS PC, LR                
 
 prefetch_abort_handler:
+    SUB LR, LR, #4             
     PUSH {R0-R9, LR}
     LDR R10, =0x4D454D        @ "MEM" en ASCII
-    POP {R0-R9, LR} @ Retorno de la excepcion
+    POP {R0-R9, LR} 
     MOVS PC, LR    
 
 
 reserved_handler:
 
 fiq_handler:
+
 reset_handler:
-@ ldr PC,=_start
-   B _start
+
 
 
 .section .data 
     value_a: .word 0x000000010
+    debug_dfar:  .word 0
+    debug_dfsr:  .word 0
 
 .section .bss
-    value_b: .word
+
+    
 
 
 .section .stack, "aw", %nobits
-    .space 4000   @ 1 KB de stack
 
 .end
 

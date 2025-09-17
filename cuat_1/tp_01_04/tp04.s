@@ -65,7 +65,7 @@ _start:
 
     @ Luego pasar a modo SYS o modo de aplicación
     CPS #0x1F            @ Cambiar a modo SYS 
-    LDR SP, =__stack_app @ (si usás una pila para el app)
+    LDR SP, =__stack_app 
 
 reset_copy: 
     LDR R0, =__reset_start   @ destino
@@ -105,59 +105,6 @@ byte_copy2:
 
     LDR R4, =code
     BLX R4
-
-
-
-
-@ reset_copy: 
-@     LDR R1, =__reset_start   @ destino
-@     LDR R0, =__reset_LMA     @ origen
-@     LDR R2, =__reset_end
-@     SUB R2, R2, R1           @ tamaño de la copia
-@     LDR R10, =move
-@     BLX R10
-
-@ data_copy: 
-@     LDR R1, =__data_start     @ destino
-@     LDR R0, =__data_LMA       @ origen
-@     LDR R2, =__data_end
-@     SUB R2, R2, R1            @ tamaño de la copia
-@     LDR R10, =move
-@     BLX R10
-@ text_copy:
-@     LDR R1, =__text_start     @ destino
-@     LDR R0, =__text_LMA       @ origen
-@     LDR R2, =__text_end
-@     SUB R2, R2, R1            @ tamaño de la copia
-@     LDR R10, =move
-@     BLX R10
-@     LDR R4, =code
-@     BLX R4
-
-@ reset_copy: 
-@     LDR R1, =__reset_start   @ destino
-@     LDR R0, =__reset_LMA     @ origen
-@     LDR R2, =__reset_end
-@     SUB R2, R2, R1           @ tamaño de la copia
-@     LDR R10, =move
-@     BLX R10
-
-@ data_copy: 
-@     LDR R1, =__data_start     @ destino
-@     LDR R0, =__data_LMA       @ origen
-@     LDR R2, =__data_end
-@     SUB R2, R2, R1            @ tamaño de la copia
-@     LDR R10, =move
-@     BLX R10
-@ text_copy:
-@     LDR R1, =__text_start     @ destino
-@     LDR R0, =__text_LMA       @ origen
-@     LDR R2, =__text_end
-@     SUB R2, R2, R1            @ tamaño de la copia
-@     LDR R10, =move
-@     BLX R10
-@     LDR R4, =code
-@     BLX R4
     
  
 
@@ -175,16 +122,16 @@ code:
     b .
 
 undef_handler:
-    SUB LR, LR, #4              @ Volver a la instrucción que causó el fallo
+    SUB LR, LR, #4             
     PUSH {R0-R12, LR}
     MOV R1, LR                  @ Dirección donde ocurrió el fallo 
     LDR R2, =0x00000000         @ Código de operación del andeq r0, r0, r0
     STR R2, [R1]                
-    POP {R0-R12, LR}            @ Retorno de la excepcion
+    POP {R0-R12, LR}            
     MOVS PC, LR
 
 svc_handler:
-    PUSH {R2-R12, LR}          @ Guardar registros menos con los que retornamos
+    PUSH {R2-R12, LR}       
     SUB LR, LR, #4             @ Volver a la instrucción SVC
     LDR R0, [LR]               
     BIC R1, R0, #0xFF000000    
