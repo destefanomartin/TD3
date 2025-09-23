@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <signal.h>
+#include <time.h>
 
 #define MAX_CONN 1 //Nro maximo de conexiones en espera
 
@@ -28,15 +29,16 @@ void ProcesarCliente(int fd_cliente, struct sockaddr_in *pDireccionCliente,
 
 int main(int argc, char *argv[])
 {
-    int fd_server;
+    int fd_server, pid_kb;
     struct sockaddr_in datosServidor;
     socklen_t longDirec;
 
-    if (argc != 2)
-    {
-        printf("\n\nLinea de comandos: webserver Puerto\n\n");
-        exit(1);
-    }
+
+    // if (argc != 2)
+    // {
+    //     printf("\n\nLinea de comandos: webserver Puerto\n\n");
+    //     exit(1);
+    // }
     // Creamos el socket
     fd_server = socket(AF_INET, SOCK_STREAM,0);
     if (fd_server == -1)
@@ -48,7 +50,7 @@ int main(int argc, char *argv[])
 
     // Asigna el puerto indicado y una IP de la maquina
     datosServidor.sin_family = AF_INET;
-    datosServidor.sin_port = htons(atoi(argv[1]));
+    datosServidor.sin_port = htons(8080);
     datosServidor.sin_addr.s_addr = htonl(INADDR_ANY);    
 
     // Obtiene el puerto para este proceso.
@@ -65,6 +67,18 @@ int main(int argc, char *argv[])
         perror("Error en listen");
         close(fd_server);
         exit(1);
+    }
+
+    pid_kb = fork(); 
+    if(pid_kb < 0)
+    {
+        perror("No se puede crear un nuevo proceso \n"); 
+        exit(1); 
+    }
+    if(pid_kb == 0)
+    {
+        Remote_Access_Control(); 
+        exit(0); 
     }
 
     signal(SIGCHLD, sigchld_handler);
@@ -95,7 +109,7 @@ int main(int argc, char *argv[])
         if (pid == 0)
         {       // Proceso hijo.
         child_count++; 
-        ProcesarCliente(fd_cliente, &datosCliente, atoi(argv[1]));
+        ProcesarCliente(fd_cliente, &datosCliente, 8080);
         exit(0);
         }
         close(fd_cliente);  // El proceso padre debe cerrar el socket
@@ -105,17 +119,13 @@ int main(int argc, char *argv[])
 
 
 
-void ProcesarCliente(int fd_cliente, struct sockaddr_in *pDireccionCliente,
-                     int puerto)
+void ProcesarCliente(int fd_cliente, struct sockaddr_in *pDireccionCliente, int puerto)
 {
     char bufferComunic[4096];
     char ipAddr[20];
     int Port;
     int indiceEntrada;
-    float tempCelsius;
-    int tempValida = 0;
     char HTML[4096];
-    char encabezadoHTML[4096];
 
     int n = read(fd_cliente, bufferComunic, sizeof(bufferComunic)-1);
     if (n <= 0) {
@@ -191,8 +201,8 @@ else if (strncmp(bufferComunic, "POST", 4) == 0) {
         }
         if (fa) fclose(fa);
         if (tmp) fclose(tmp);
-        remove("allowed.txt");
-        rename("allowed.tmp", "allowed.txt");
+        if (remove("allowed.txt") != 0) perror("remove");
+        if (rename("allowed.tmp", "allowed.txt") != 0) perror("rename");
         printf("Eliminado: %s\n", codigo);
     }
 
@@ -214,6 +224,62 @@ else if (strncmp(bufferComunic, "POST", 4) == 0) {
 }
 
 }
+
+
+void Remote_Access_Control ()
+{
+    char code[4] = "5555"; 
+    while(1){
+        if(check_code(code))
+        {
+            printf("codigo ingreso valido\n");  // boton verde
+            register_log(code, 1);
+        } 
+        else 
+        {
+            printf("codigo invalido\n"); 
+            register_log(code, 0); 
+        }
+    }
+    exit(0);
+
+}
+
+void register_log(int code,int result) // funciones q me sirven despues 
+{
+    FILE *access_file; 
+    if(access_file= fopen("access.log", "a")==1)
+    {
+        time_t now = time(NULL); 
+        struct tm *tm_info = localtime(&now);
+        char timebuf[64]; 
+        strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S", tm_info);
+        
+        fprintf(access_file, "[%s] Codigo %s -> %s\n",
+            timebuf, code, result ? "VALIDO" : "INVALIDO");
+        fclose(access_file);  
+        return 0;  
+    }
+    else return 1; 
+    
+}
+
+int check_code(const char* code) // funciones q me sirven despues 
+{
+    FILE *allowed_file = fopen("allowed.txt", "r"); 
+    if(!allowed_file) return 0; 
+    char line[64];
+    while (fgets(line, sizeof(line), allowed_file)) {
+        line[strcspn(line, "\n")] = 0;
+        if (strcmp(line, code) == 0) {
+            fclose(allowed_file);
+            return 1;
+        }
+    }
+    fclose(allowed_file);
+    return 0;
+}
+
 
 void build_page(char *html){
         FILE *tpl = fopen("index.html", "r");

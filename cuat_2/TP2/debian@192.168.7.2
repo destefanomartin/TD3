@@ -1,0 +1,151 @@
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/init.h>
+#include <linux/platform_device.h>
+#include <linux/gpio.h>
+#include <linux/fs.h>
+#include <linux/errno.h>
+#include <asm/uaccess.h>
+#include <linux/version.h>
+#include <linux/types.h>
+#include <linux/kdev_t.h>
+#include <linux/device.h>
+#include <linux/cdev.h>
+#include <linux/sched.h>
+
+MODULE_LICENSE("Dual BSD/GPL"); // Requerido
+MODULE_AUTHOR("Martin Destefano");
+MODULE_DESCRIPTION("");
+
+static dev_t dev; // Todo estatico para que no se meta dentro del Kernel
+static struct class *cl; 
+
+struct file_operations td3driver_fops =
+{
+  .owner = THIS_MODULE, 
+  .read = td3driver_read,
+  .write = td3driver_write,      
+};
+static struct cdev td3driver_cdev;
+
+
+static int td3_probe(struct platform_device *pdev)
+{
+    printk(KERN_INFO "td3driver: probe() llamado\n");
+    // acá podrías hacer request de GPIO, IRQ, etc.
+    return 0;
+}
+
+static int td3_remove(struct platform_device *pdev)
+{
+    printk(KERN_INFO "td3driver: remove() llamado\n");
+    return 0;
+}
+
+static const struct of_device_id td3_device[] = {
+    { .compatible = "td3,destefano" }
+};
+MODULE_DEVICE_TABLE(of, td3_device);
+
+
+static struct platform_driver td3_platform_driver = {
+    .probe  = td3_probe,
+    .remove = td3_remove,
+    .driver = {
+        .name           = "td3driver",
+        .of_match_table = td3_device,
+    },
+};
+
+static int td3driver_init( void )
+{
+  int registration_return; 
+
+  if (alloc_chrdev_region( &dev, 0, 1, "td3driver" ) < 0)
+  {  
+    printk( KERN_ALERT "No se puede ubicar la region\n" );
+    return -1;
+  }
+  cl = class_create(THIS_MODULE, "chardev" );
+  if ( cl == NULL )
+  {
+    printk( KERN_ALERT "No se puede crear la clase\n" );
+    // Borrar lo asignado para no tener memory leak en kernel
+    unregister_chrdev_region( dev, 1 ); // IMPORTANTE!
+    return -1;
+  }
+  // Asignar el callback que pone los permisos en /dev/letras
+  cl -> dev_uevent = my_dev_uevent;
+  if( device_create( cl, NULL, dev, NULL, "td3driver" ) == NULL )
+  {
+    printk( KERN_ALERT "No se puede crear el device driver\n" );
+    // Borrar lo asignado para no tener memory leak en kernel
+    class_destroy(cl);
+    unregister_chrdev_region( dev, 1 );
+    return -1;
+  }
+  cdev_init(&td3driver_cdev, &td3driver_fops); // Letras fops apunta a las operaciones read, write, etc.
+  letras_cdev.owner = THIS_MODULE;
+  letras_cdev.ops = &td3driver_fops;
+  if (cdev_add(&td3driver_cdev, dev, 1) == -1)
+  {
+    printk( KERN_ALERT "No se pudo agregar el device driver al kernel\n" );
+    // Borrar lo asignado para no tener memory leak en kernel
+    device_destroy( cl, dev );
+    class_destroy( cl );
+    unregister_chrdev_region( dev, 1 );
+    return -1;
+  }
+  printk(KERN_ALERT "Driver instalado con numero mayor %d y numero menor %d\n",
+	 MAJOR(dev), MINOR(dev));
+
+  registration_return = platform_driver_register(&td3_platform_driver); 
+  if(registration_return < 0)
+  {
+    printk(KERN_ALERT "NO SE REGISTRO EL PLATFORM DRIVER"); 
+    cdev_del(&td3driver_cdev);
+    device_destroy( cl, dev );
+    class_destroy( cl );
+    unregister_chrdev_region(dev, 1);
+    return registration_return; 
+  }
+
+  printk(KERN_INFO "DRIVER INSTALADO\n");
+  return 0; 
+}
+
+static int my_dev_uevent(struct device *dev, struct kobj_uevent_env *env)
+{
+    add_uevent_var(env, "DEVMODE=%#o", 0666);
+    return 0;
+}
+
+
+static void td3driver_exit( void )
+{
+    // Borrar lo asignado para no tener memory leak en kernel
+  platform_driver_unregister(&td3_platform_driver);
+  cdev_del(&td3driver_cdev);
+  device_destroy( cl, dev );
+  class_destroy( cl );
+  unregister_chrdev_region(dev, 1);
+  printk(KERN_ALERT "Driver td3 desinstalado.\n");
+}
+
+static ssize_t td3driver_read(struct file *filp, char __user *buf,
+                              size_t count, loff_t *f_pos)
+{
+    printk(KERN_INFO "td3driver: read()\n");
+    return 0; 
+}
+
+static ssize_t td3driver_write(struct file *filp, const char __user *buf,
+                               size_t count, loff_t *f_pos)
+{
+    printk(KERN_INFO "td3driver: write()\n");
+    return count; // simula que escribió todo
+}
+
+
+module_init(td3driver_init); // Rutinas a ejecutarse dentro para instalar
+module_exit(td3driver_exit);
