@@ -6,12 +6,90 @@
 #include <linux/fs.h>
 #include <linux/errno.h>
 #include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/version.h>
 #include <linux/types.h>
 #include <linux/kdev_t.h>
 #include <linux/device.h>
 #include <linux/cdev.h>
 #include <linux/sched.h>
+#include <linux/io.h>
+
+
+#define GPIO2_REGISTER 0x481AC000
+#define CM_PER_REGISTER 0x44E00000 
+#define CM_REGISTER 0x44E10000
+
+#define GPIO2_SIZE 0x1000
+#define CM_PER_SIZE 0x400
+#define CM_SIZE 0x20000
+
+
+/* OFFSET GPIO2 REGISTER */
+
+#define GPIO_REVISION           0x000
+#define GPIO_SYSCONFIG          0x010
+#define GPIO_EOI                0x020
+#define GPIO_IRQSTATUS_RAW_0    0x024
+#define GPIO_IRQSTATUS_RAW_1    0x028
+#define GPIO_IRQSTATUS_0        0x02C
+#define GPIO_IRQSTATUS_1        0x030
+#define GPIO_IRQSTATUS_SET_0    0x034
+#define GPIO_IRQSTATUS_SET_1    0x038
+#define GPIO_IRQSTATUS_CLR_0    0x03C
+#define GPIO_IRQSTATUS_CLR_1    0x040
+#define GPIO_IRQWAKEN_0         0x044
+#define GPIO_IRQWAKEN_1         0x048
+#define GPIO_SYSSTATUS          0x114
+#define GPIO_CTRL               0x130
+#define GPIO_OE                 0x134
+#define GPIO_DATAIN             0x138
+#define GPIO_DATAOUT            0x13C
+#define GPIO_LEVELDETECT0       0x140
+#define GPIO_LEVELDETECT1       0x144
+#define GPIO_RISINGDETECT       0x148
+#define GPIO_FALLINGDETECT      0x14C
+#define GPIO_DEBOUNCENABLE      0x150
+#define GPIO_DEBOUNCINGTIME     0x154
+#define GPIO_CLEARDATAOUT       0x190
+#define GPIO_SETDATAOUT         0x194
+
+/* OFFSET CM_PER FOR GPIO2 */
+#define GPIO2_CLK_OFFSET 0xB0
+
+/* OFFSET FOR PINS */
+
+// KEYBOARD eight pins provisional
+
+#define C1_OFFSET 0x8A0 // SALIDA C1 P8_45 2_6 
+#define C2_OFFSET 0x8A4 // SALIDA C2 P8_46 2_7
+#define C3_OFFSET 0x8A8 // SALIDA C3 P8_43 2_8
+#define F1_OFFSET 0x8AC // ENTRADA F1 P8_44 2_9
+#define F2_OFFSET 0x8B0 // ENTRADA F2 P8_41 2_10
+#define F3_OFFSET 0x8B4 // ENTRADA F3 P8_42 2_11
+#define F4_OFFSET 0x8B8 // ENTRADA F4 P8_39 2_12
+
+// BUZZER 
+#define BUZZER_OFFSET 0x88C // SALIDA P8_18 2_1
+
+// LEDS three provisional
+#define GLED_OFFSET 0x890 // SALIDA P8_7 2_2
+#define RLED_OFFSET 0x894 // SALIDA P8_8 2_3
+#define BLED_OFFSET 0x898 // SALIDA P8_10 2_4
+
+// Valores para pines 
+
+#define GPIO_INPUT 0x77 // (1110111)
+#define GPIO_OUTPUT 0x7F
+#define OE_CONFIG_INPUT 0x1E00
+#define OE_CONFIG_OUTPUT 0x01DE
+#define DEBOUNCE_ENABLE 0x1E00
+#define DEBOUNCE_TIME 0x284
+#define IRQ_ENABLE 0x1E00
+#define LOW_LEVEL_DETECT 0x1E00
+#define CLEAR_IRQ 0x1E00
+#define FALLING_DETECT 0x1E00
+#define CLK_GPIO2_CONFIG 0x4002 // Enable + Optional features for deboucing
 
 MODULE_LICENSE("Dual BSD/GPL"); // Requerido
 MODULE_AUTHOR("Martin Destefano");
@@ -21,6 +99,11 @@ static ssize_t td3driver_read(struct file *, char __user *, size_t, loff_t *);
 static ssize_t td3driver_write(struct file *, const char __user *, size_t, loff_t *);
 static int my_dev_uevent(struct device *, struct kobj_uevent_env *);
 
+
+
+static void __iomem *gpio2_base; 
+static void __iomem *cm_base; 
+static void __iomem *cm_per_base; 
 
 static dev_t dev; // Todo estatico para que no se meta dentro del Kernel
 static struct class *cl; 
@@ -35,8 +118,79 @@ static struct cdev td3driver_cdev;
 
 
 static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de las direcciones de memoria, etc. Por ahora asegurar que lo llama 
-{
+{ 
     printk(KERN_INFO "td3driver: probe() llamado\n");
+
+
+    /* Mapeo los tres registros que necesito, el de GPIO, CM para controlar la func. del pin
+    y CM_PER_BASE para los timers del GPIO2 */
+    cm_base = ioremap(CM_REGISTER, CM_SIZE); 
+    if(!cm_base)
+    {
+      return -ENOMEM;
+    }  
+
+    iowrite32(GPIO_OUTPUT, cm_base + C1_OFFSET ); 
+    iowrite32(GPIO_OUTPUT, cm_base + C2_OFFSET ); 
+    iowrite32(GPIO_OUTPUT, cm_base + C3_OFFSET ); 
+    iowrite32(GPIO_INPUT, cm_base + F1_OFFSET ); 
+    iowrite32(GPIO_INPUT, cm_base + F2_OFFSET ); 
+    iowrite32(GPIO_INPUT, cm_base + F3_OFFSET ); 
+    iowrite32(GPIO_INPUT, cm_base + F4_OFFSET ); 
+
+    iowrite32(GPIO_OUTPUT, cm_base + RLED_OFFSET ); 
+    iowrite32(GPIO_OUTPUT, cm_base + GLED_OFFSET ); 
+    iowrite32(GPIO_OUTPUT, cm_base + BLED_OFFSET ); 
+
+    iowrite32(GPIO_OUTPUT, cm_base + BUZZER_OFFSET ); 
+
+    cm_per_base = ioremap(CM_PER_REGISTER, CM_PER_SIZE);    
+    if(!cm_per_base)
+    {
+      iounmap(cm_base);
+      return -ENOMEM;
+    }  
+
+    // Configuracion de CLK GPIO2
+    iowrite32(CLK_GPIO2_CONFIG, cm_per_base + GPIO2_CLK_OFFSET); 
+
+
+    gpio2_base = ioremap(GPIO2_REGISTER, GPIO2_SIZE); 
+    if(!gpio2_base)
+    {
+      iounmap(cm_base);
+      iounmap(cm_per_base);
+      return -ENOMEM;
+    }  
+
+    // Verificar estado de reset
+    if(ioread32(gpio2_base + GPIO_SYSSTATUS)) printk("Reset realizado\n"); 
+    else printk("Reset no realizado\n"); 
+
+    // Configurar E/S
+    u32 oe_register = ioread32(gpio2_base + GPIO_OE); 
+    oe_register &= ~OE_CONFIG_OUTPUT; 
+    oe_register |= OE_CONFIG_INPUT; 
+    iowrite32(oe_register, gpio2_base + GPIO_OE); 
+
+    // Activar debounce 
+    iowrite32(DEBOUNCE_ENABLE, gpio2_base + GPIO_DEBOUNCENABLE); 
+
+    // Tiempo de debounce 
+    iowrite32(DEBOUNCE_TIME, gpio2_base + GPIO_DEBOUNCINGTIME); 
+
+    // Activar IRQ en las entradas 
+    iowrite32(IRQ_ENABLE, gpio2_base + GPIO_IRQSTATUS_SET_0); 
+
+    // Limpiar interrupciones por las dudas 
+    iowrite32(CLEAR_IRQ, gpio2_base + GPIO_IRQSTATUS_CLR_0);
+
+    // Desactivar high level y activar low level (se hace solo x reset)
+    iowrite32(LOW_LEVEL_DETECT, gpio2_base + GPIO_LEVELDETECT0); 
+
+    // Falling edge detect 
+    iowrite32(FALLING_DETECT, gpio2_base + GPIO_FALLINGDETECT); 
+
     return 0;
 }
 
@@ -132,6 +286,9 @@ static int td3driver_init( void )
 static void td3driver_exit( void )
 {
     // Borrar lo asignado para no tener memory leak en kernel
+  iounmap(cm_base); 
+  iounmap(cm_per_base);
+  iounmap(gpio2_base); 
   platform_driver_unregister(&td3_platform_driver);
   cdev_del(&td3driver_cdev);
   device_destroy( cl, dev );
