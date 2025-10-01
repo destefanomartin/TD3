@@ -14,6 +14,8 @@
 #include <linux/cdev.h>
 #include <linux/sched.h>
 #include <linux/io.h>
+#include <linux/delay.h>
+#include <linux/jiffies.h>
 
 
 #define GPIO2_REGISTER 0x481AC000
@@ -62,8 +64,11 @@
 // KEYBOARD eight pins provisional
 
 #define C1_OFFSET 0x8A0 // SALIDA C1 P8_45 2_6 
+#define C1_PIN (1 << 6)
 #define C2_OFFSET 0x8A4 // SALIDA C2 P8_46 2_7
+#define C2_PIN (1 << 7)
 #define C3_OFFSET 0x8A8 // SALIDA C3 P8_43 2_8
+#define C3_PIN (1 << 8)
 #define F1_OFFSET 0x8AC // ENTRADA F1 P8_44 2_9
 #define F2_OFFSET 0x8B0 // ENTRADA F2 P8_41 2_10
 #define F3_OFFSET 0x8B4 // ENTRADA F3 P8_42 2_11
@@ -71,11 +76,17 @@
 
 // BUZZER 
 #define BUZZER_OFFSET 0x88C // SALIDA P8_18 2_1
+#define BUZZER_PIN (1 << 1)
+
 
 // LEDS three provisional
 #define GLED_OFFSET 0x890 // SALIDA P8_7 2_2
+#define GLED_PIN (1 << 2)
 #define RLED_OFFSET 0x894 // SALIDA P8_8 2_3
+#define RLED_PIN (1 << 3)
 #define BLED_OFFSET 0x898 // SALIDA P8_10 2_4
+#define BLED_PIN (1 << 4)
+
 
 // Valores para pines 
 
@@ -91,6 +102,24 @@
 #define FALLING_DETECT 0x1E00
 #define CLK_GPIO2_CONFIG 0x4002 // Enable + Optional features for deboucing
 
+
+// Jiffies 
+
+static struct timer_list kbread_timer; 
+static struct timer_list led_timer; 
+static struct timer_list long_buzzer_timer; 
+static struct timer_list short_buzzer_timer; 
+
+// Lectura y escritura 
+
+static const char keyboard_mapping[4][3] = {
+    {'1', '2', '3'},
+    {'4', '5', '6'},
+    {'7', '8', '9'},
+    {'#', '0', '*'}
+};
+
+
 MODULE_LICENSE("Dual BSD/GPL"); // Requerido
 MODULE_AUTHOR("Martin Destefano");
 MODULE_DESCRIPTION("");
@@ -99,7 +128,8 @@ static ssize_t td3driver_read(struct file *, char __user *, size_t, loff_t *);
 static ssize_t td3driver_write(struct file *, const char __user *, size_t, loff_t *);
 static int my_dev_uevent(struct device *, struct kobj_uevent_env *);
 
-
+static char buffer[4]; 
+static int char_count = 0; 
 
 static void __iomem *gpio2_base; 
 static void __iomem *cm_base; 
@@ -117,6 +147,81 @@ struct file_operations td3driver_fops =
 static struct cdev td3driver_cdev;
 
 
+static char kb_read(void)
+{
+    int col, row; 
+    char key; 
+    for(col = 0; col < 3; col++)
+    {
+      iowrite32(C1_PIN, gpio2_base + GPIO_DATAOUT);
+      iowrite32(C2_PIN, gpio2_base + GPIO_DATAOUT); 
+      iowrite32(C3_PIN, gpio2_base + GPIO_DATAOUT); 
+      
+      if(col == 0) iowrite32(C1_PIN, gpio2_base + GPIO_CLEARDATAOUT);
+      if(col == 1) iowrite32(C2_PIN, gpio2_base + GPIO_CLEARDATAOUT);
+      if(col == 2) iowrite32(C3_PIN, gpio2_base + GPIO_CLEARDATAOUT);
+
+      for(row = 9; row < 13; row++)
+      {
+        if((ioread32(gpio2_base + GPIO_DATAIN) << row) == 0) 
+        {
+          key = keyboard_mapping[col][row-9]; 
+          return key;  
+        }
+      }
+    }
+
+    return key; 
+
+}
+
+
+
+static void kbread_timer_callback(struct timer_list *t)
+{
+    char key = kb_read();
+    if(key == 0) // buffer vacio
+    {
+      buffer[0] = '\0';
+      char_count = 0; 
+    } 
+    if(key == '*') 
+    // reiniciar buffer 
+    {
+      buffer[0] = '\0';
+      char_count = 0;
+    }
+    else { 
+      buffer[char_count] = key; 
+      char_count++; 
+    } 
+    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(20));
+}
+
+static void led_timer_callback(struct timer_list *t)
+{
+    // Logica apagado ( no se renueva, se activa cuando se ingresa un codigo correcto, erroneo o nuevo)
+    iowrite32(RLED_PIN, gpio2_base + GPIO_CLEARDATAOUT); 
+    iowrite32(GLED_PIN, gpio2_base + GPIO_CLEARDATAOUT);
+    iowrite32(BLED_PIN, gpio2_base + GPIO_CLEARDATAOUT);
+}
+
+static void long_buzzer_timer_callback(struct timer_list *t)
+{
+    // Logica apagado ( no se renueva timer, se activa cuando se recibe un codigo nuevo )
+    iowrite32(BUZZER_PIN, gpio2_base + GPIO_CLEARDATAOUT);
+
+}
+
+static void short_buzzer_timer_callback(struct timer_list *t)
+{
+    // Logica apagado ( no se renueva, se activa con codigo correcto u erroneo )
+    iowrite32(BUZZER_PIN, gpio2_base + GPIO_CLEARDATAOUT);
+
+}
+
+
+
 static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de las direcciones de memoria, etc. Por ahora asegurar que lo llama 
 { 
     printk(KERN_INFO "td3driver: probe() llamado\n");
@@ -125,9 +230,9 @@ static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de la
     /* Mapeo los tres registros que necesito, el de GPIO, CM para controlar la func. del pin
     y CM_PER_BASE para los timers del GPIO2 */
     cm_base = ioremap(CM_REGISTER, CM_SIZE); 
-    if(!cm_base)
+    if(cm_base == NULL)
     {
-      return -ENOMEM;
+      return -1;
     }  
 
     iowrite32(GPIO_OUTPUT, cm_base + C1_OFFSET ); 
@@ -144,11 +249,15 @@ static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de la
 
     iowrite32(GPIO_OUTPUT, cm_base + BUZZER_OFFSET ); 
 
+    u32 cmconfig;
+
+    cmconfig = ioread32(cm_base + RLED_OFFSET);
+
     cm_per_base = ioremap(CM_PER_REGISTER, CM_PER_SIZE);    
-    if(!cm_per_base)
+    if(cm_per_base == NULL)
     {
       iounmap(cm_base);
-      return -ENOMEM;
+      return -1;
     }  
 
     // Configuracion de CLK GPIO2
@@ -156,11 +265,11 @@ static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de la
 
 
     gpio2_base = ioremap(GPIO2_REGISTER, GPIO2_SIZE); 
-    if(!gpio2_base)
+    if(gpio2_base == NULL)
     {
       iounmap(cm_base);
       iounmap(cm_per_base);
-      return -ENOMEM;
+      return -1;
     }  
 
     // Verificar estado de reset
@@ -171,6 +280,8 @@ static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de la
     u32 oe_register = ioread32(gpio2_base + GPIO_OE); 
     oe_register &= ~OE_CONFIG_OUTPUT; 
     oe_register |= OE_CONFIG_INPUT; 
+    printk(KERN_INFO "GPIO_OE = 0x%08x\n", oe_register);
+
     iowrite32(oe_register, gpio2_base + GPIO_OE); 
 
     // Activar debounce 
@@ -191,6 +302,27 @@ static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de la
     // Falling edge detect 
     iowrite32(FALLING_DETECT, gpio2_base + GPIO_FALLINGDETECT); 
 
+    iowrite32(1 << 3, gpio2_base + GPIO_SETDATAOUT); 
+    printk(KERN_INFO "LED rojo encendido\n");
+    ioread32(gpio2_base + GPIO_DATAOUT); 
+    printk(KERN_INFO "cmconfig RLED = 0x%08x\n", cmconfig);
+
+
+    msleep(10000);
+
+    iowrite32(1 << 3, gpio2_base + GPIO_CLEARDATAOUT); 
+    printk(KERN_INFO "LED rojo apagado\n");
+
+    timer_setup(&kbread_timer, kbread_timer_callback, 0); 
+    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(20)); 
+
+    timer_setup(&led_timer, led_timer_callback, 0);
+    timer_setup(&long_buzzer_timer, long_buzzer_timer_callback, 0);
+    timer_setup(&short_buzzer_timer, short_buzzer_timer_callback, 0);
+
+
+
+
     return 0;
 }
 
@@ -205,6 +337,10 @@ static const struct of_device_id td3_device[] = {
     {}
 };
 MODULE_DEVICE_TABLE(of, td3_device);
+
+
+
+
 
 
 static struct platform_driver td3_platform_driver = {
@@ -286,6 +422,10 @@ static int td3driver_init( void )
 static void td3driver_exit( void )
 {
     // Borrar lo asignado para no tener memory leak en kernel
+  del_timer(&short_buzzer_timer); 
+  del_timer(&long_buzzer_timer); 
+  del_timer(&led_timer); 
+  del_timer(&kbread_timer); 
   iounmap(cm_base); 
   iounmap(cm_per_base);
   iounmap(gpio2_base); 
@@ -307,8 +447,14 @@ static ssize_t td3driver_read(struct file *filp, char __user *buf,
 static ssize_t td3driver_write(struct file *filp, const char __user *buf,
                                size_t count, loff_t *f_pos)
 {
+
+
+
+    // TODO: switch case para buzzer, long buzzer, red led, green led and orange led 
+
+
     printk(KERN_INFO "td3driver: write()\n");
-    return count; // simula que escribió todo
+    return count; 
 }
 
 
