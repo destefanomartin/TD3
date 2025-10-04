@@ -17,6 +17,21 @@
 #include <linux/delay.h>
 #include <linux/jiffies.h>
 
+struct arguments {
+    u8 command;
+    u8 millis;   /* tens of milliseconds (i.e. 20 => 200 ms) */
+};
+
+/* Comandos */
+enum {
+    CMD_FORBIDDEN = 0,
+    CMD_BEEP = 1,
+    CMD_GREEN_LED = 2,
+    CMD_RED_LED   = 3,
+    CMD_ORANGE_LED = 4
+};
+
+
 
 #define GPIO2_REGISTER 0x481AC000
 #define CM_PER_REGISTER 0x44E00000 
@@ -64,11 +79,11 @@
 // KEYBOARD eight pins provisional
 
 #define C1_OFFSET 0x8C4 // SALIDA C1 P8_38 2_15
-#define C1_PIN (1 << 15)
+#define C1_PIN 79
 #define C2_OFFSET 0x8C0 // SALIDA C2 P8_37 2_14
-#define C2_PIN (1 << 14)
+#define C2_PIN 78
 #define C3_OFFSET 0x8A8 // SALIDA C3 P8_43 2_8
-#define C3_PIN (1 << 8)
+#define C3_PIN 72
 #define F1_OFFSET 0x8AC // ENTRADA F1 P8_44 2_9
 #define F2_OFFSET 0x8B0 // ENTRADA F2 P8_41 2_10
 #define F3_OFFSET 0x8B4 // ENTRADA F3 P8_42 2_11
@@ -98,7 +113,7 @@ static const u32 col_pins[3] = { C1_PIN, C2_PIN, C3_PIN };
 #define OE_CONFIG_INPUT 0x1E00
 #define OE_CONFIG_OUTPUT 0xC11E
 #define DEBOUNCE_ENABLE 0x1E00
-#define DEBOUNCE_TIME 0x1E3
+#define DEBOUNCE_TIME 0x285
 #define IRQ_ENABLE 0x1E00
 #define LOW_LEVEL_DETECT 0x1E00
 #define CLEAR_IRQ 0x1E00
@@ -108,6 +123,11 @@ static const u32 col_pins[3] = { C1_PIN, C2_PIN, C3_PIN };
 #define COL_MASK (C1_PIN | C2_PIN | C3_PIN)   // 0x0000C100
 #define ROW_MASK ( (1<<9) | (1<<10) | (1<<11) | (1<<12) ) // 0x1E00
 
+
+static char prev_scan_key = 0;         /* última tecla leída por kb_read() */
+static char last_processed_key = 0;    /* última tecla ya procesada (evita repeticiones mientras se mantiene) */
+static int stable_count = 0;           /* cuantas lecturas consecutivas igual a prev_scan_key */
+#define STABLE_REQUIRED 2              /* requerir 2 lecturas iguales para considerar estable */
 // Jiffies 
 
 static struct timer_list kbread_timer; 
@@ -154,24 +174,27 @@ static struct cdev td3driver_cdev;
 
 static char kb_read(void)
 {
-    int col, row; 
+    int col, row,c; 
     char key=0; 
     for(col = 0; col < 3; col++)
     {
-      iowrite32(C1_PIN, gpio2_base + GPIO_SETDATAOUT);
-      iowrite32(C2_PIN, gpio2_base + GPIO_SETDATAOUT); 
-      iowrite32(C3_PIN, gpio2_base + GPIO_SETDATAOUT); 
-      
-      if(col == 2) iowrite32(C3_PIN, gpio2_base + GPIO_CLEARDATAOUT);
-      if(col == 0) iowrite32(C1_PIN, gpio2_base + GPIO_CLEARDATAOUT);
-      if(col == 1) iowrite32(C2_PIN, gpio2_base + GPIO_CLEARDATAOUT);
+      // Poner todas en 1
+      for(c = 0; c < 3; c++)
+      {
+        gpio_set_value(col_pins[c], 1);
+      }
+
+      // Poner a 0 la columna actual
+      gpio_set_value(col_pins[col], 0);
+      udelay(500);
 
       for(row = 9; row < 13; row++)
       {
         if((ioread32(gpio2_base + GPIO_DATAIN) & (1u << row)) == 0) 
         {
           printk(KERN_INFO "columna %d y fila %d\n", col, row);
-          key = keyboard_mapping[col][row-9]; 
+          key = keyboard_mapping[row-9][col]; 
+          gpio_set_value(col_pins[col], 1);
           return key;  
         }
       }
@@ -183,39 +206,66 @@ static char kb_read(void)
 }
 
 
+static void process_key(char key) {
+    /* lógica de procesado de una pulsación "válida" (se ejecuta una sola vez por pulsación) */
+    if (key == '*') {
+        if (char_count == 4) {
+            /* Trama completa: xxxx* */
+            buffer[char_count] = '\0';
+            printk(KERN_INFO "Codigo ingresado: %s\n", buffer);
+            char_count = 0;
+            buffer[0] = '\0';
+        } else {
+            /* Asterisco antes del final: reiniciar trama */
+            char_count = 0;
+            buffer[0] = '\0';
+            printk(KERN_INFO "Asterisco prematuro -> reinicio trama\n");
+        }
+    } else {
+        /* Si no es asterisco, agregar dígito si hay espacio */
+        if (char_count < (int)sizeof(buffer) - 1) {
+            buffer[char_count++] = key;
+            buffer[char_count] = '\0';
+            printk(KERN_INFO "Tecla aceptada: %c  buffer: %s\n", key, buffer);
+        } else {
+            /* buffer lleno: reiniciar (puedes cambiar política si quieres) */
+            printk(KERN_INFO "Buffer overflow -> reinicio\n");
+            char_count = 0;
+            buffer[0] = '\0';
+        }
+    }
+}
 
 static void kbread_timer_callback(struct timer_list *t)
 {
-    char key = kb_read();
+    char key = kb_read(); /* lee la tecla actual (0 si no hay) */
 
-    if(key == 0) // buffer vacio
-    {
-      buffer[0] = '\0';
-      char_count = 0; 
-    } 
-    else if(key == '#' && char_count == 4) 
-    // reiniciar buffer 
-    {
-      buffer[char_count] = '\0';
-      char_count = 0;
-      printk(KERN_INFO "Codigo ingresado: %s\n", buffer);
-      buffer[0] = '\0';
-      char_count = 0;
+    /* --- Debounce sencillo por software: requerimos STABLE_REQUIRED lecturas iguales --- */
+    if (key == prev_scan_key) {
+        stable_count++;
+    } else {
+        prev_scan_key = key;
+        stable_count = 1;
     }
-    else if(key == '#')
-    {
-      buffer[0]='\0';
-      char_count=0;
+
+    /* Si la lectura está estableamos, actuamos sobre el flanco */
+    if (stable_count >= STABLE_REQUIRED) {
+        if (key != 0 && last_processed_key == 0) {
+            /* flanco 0 -> key (nueva pulsación estable) */
+            process_key(key);
+            last_processed_key = key; /* marcamos que ya procesamos esta pulsación hasta que se suelte */
+        } else if (key == 0) {
+            /* tecla liberada: permitimos procesar la próxima pulsación */
+            last_processed_key = 0;
+        }
+        /* si key != 0 pero last_processed_key != 0 -> tecla mantenida: no hacemos nada */
     }
-    else { 
-    if (char_count < sizeof(buffer) - 1) {
-        buffer[char_count++] = key;
-        printk(KERN_INFO "Tecla: %c\n", key); 
-        buffer[char_count] = '\0';
-        
-    } } 
-    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(200));
+
+    /* volver a programar timer.
+       Nota: podés aumentar a 30..50 ms si querés menos sensibilidad / menos CPU. */
+    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(30));
 }
+
 
 static void led_timer_callback(struct timer_list *t)
 {
@@ -250,9 +300,9 @@ static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de la
     y CM_PER_BASE para los timers del GPIO2 */
     cm_base = ioremap(CM_REGISTER, CM_SIZE); 
     if(cm_base == NULL)
-    {
-      return -1;
-    }  
+      {
+        return -1;
+      }  
 
     iowrite32(GPIO_OUTPUT, cm_base + C1_OFFSET ); 
     iowrite32(GPIO_OUTPUT, cm_base + C2_OFFSET ); 
@@ -336,35 +386,6 @@ static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de la
 
     // Falling edge detect 
     iowrite32(FALLING_DETECT, gpio2_base + GPIO_FALLINGDETECT); 
-
-    iowrite32(1 << 3, gpio2_base + GPIO_SETDATAOUT); 
-    printk(KERN_INFO "LED rojo encendido\n");
-    ioread32(gpio2_base + GPIO_DATAOUT); 
-    printk(KERN_INFO "cmconfig RLED = 0x%08x\n", cmconfig);
-
-
-    msleep(5000);
-
-    iowrite32(1 << 3, gpio2_base + GPIO_CLEARDATAOUT); 
-    printk(KERN_INFO "LED rojo apagado\n");
-
-    iowrite32(GLED_PIN, gpio2_base + GPIO_SETDATAOUT); 
-    printk(KERN_INFO "LED rojo encendido\n");
-    ioread32(gpio2_base + GPIO_DATAOUT); 
-
-    msleep(5000);
-
-    iowrite32(GLED_PIN, gpio2_base + GPIO_CLEARDATAOUT); 
-    printk(KERN_INFO "LED rojo apagado\n");
-
-    iowrite32(BUZZER_PIN, gpio2_base + GPIO_SETDATAOUT); 
-    printk(KERN_INFO "BUZZ encendido\n");
-    ioread32(gpio2_base + GPIO_DATAOUT); 
-
-    msleep(1000);
-
-    iowrite32(BUZZER_PIN, gpio2_base + GPIO_CLEARDATAOUT); 
-    printk(KERN_INFO "BUZZ apagado\n");
 
 
 
@@ -503,14 +524,42 @@ static ssize_t td3driver_read(struct file *filp, char __user *buf,
 static ssize_t td3driver_write(struct file *filp, const char __user *buf,
                                size_t count, loff_t *f_pos)
 {
+    struct arguments args;
 
+    if (count < sizeof(args))
+        return -EINVAL;
 
+    if (copy_from_user(&args, buf, sizeof(args)))
+        return -EFAULT;
 
-    // TODO: switch case para buzzer, long buzzer, red led, green led and orange led 
+    /* Interpretar comando */
+    switch (args.command) {
+    case CMD_BEEP:
+        iowrite32(BUZZER_PIN, gpio2_base + GPIO_SETDATAOUT);
+        /* programar timer para apagar en args.millis * 10 ms */
+        mod_timer(&short_buzzer_timer, jiffies + msecs_to_jiffies(args.millis * 10));
+        break;
 
+    case CMD_GREEN_LED:
+        iowrite32(GLED_PIN, gpio2_base + GPIO_SETDATAOUT);
+        mod_timer(&led_timer, jiffies + msecs_to_jiffies(args.millis * 10));
+        break;
 
-    printk(KERN_INFO "td3driver: write()\n");
-    return count; 
+    case CMD_RED_LED:
+        iowrite32(RLED_PIN, gpio2_base + GPIO_SETDATAOUT);
+        mod_timer(&led_timer, jiffies + msecs_to_jiffies(args.millis * 10));
+        break;
+
+    case CMD_ORANGE_LED:
+        iowrite32(RLED_PIN | GLED_PIN, gpio2_base + GPIO_SETDATAOUT);
+        mod_timer(&led_timer, jiffies + msecs_to_jiffies(args.millis * 10));
+        break;
+
+    default:
+        return -EINVAL;
+    }
+
+    return sizeof(args); /* bytes consumidos */ 
 }
 
 
