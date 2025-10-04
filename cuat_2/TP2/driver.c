@@ -63,16 +63,19 @@
 
 // KEYBOARD eight pins provisional
 
-#define C1_OFFSET 0x8A0 // SALIDA C1 P8_45 2_6 
-#define C1_PIN (1 << 6)
-#define C2_OFFSET 0x8A4 // SALIDA C2 P8_46 2_7
-#define C2_PIN (1 << 7)
+#define C1_OFFSET 0x8C4 // SALIDA C1 P8_38 2_15
+#define C1_PIN (1 << 15)
+#define C2_OFFSET 0x8C0 // SALIDA C2 P8_37 2_14
+#define C2_PIN (1 << 14)
 #define C3_OFFSET 0x8A8 // SALIDA C3 P8_43 2_8
 #define C3_PIN (1 << 8)
 #define F1_OFFSET 0x8AC // ENTRADA F1 P8_44 2_9
 #define F2_OFFSET 0x8B0 // ENTRADA F2 P8_41 2_10
 #define F3_OFFSET 0x8B4 // ENTRADA F3 P8_42 2_11
 #define F4_OFFSET 0x8B8 // ENTRADA F4 P8_39 2_12
+
+
+static const u32 col_pins[3] = { C1_PIN, C2_PIN, C3_PIN };
 
 // BUZZER 
 #define BUZZER_OFFSET 0x88C // SALIDA P8_18 2_1
@@ -91,17 +94,19 @@
 // Valores para pines 
 
 #define GPIO_INPUT 0x77 // (1110111)
-#define GPIO_OUTPUT 0x7F
+#define GPIO_OUTPUT 0x5F
 #define OE_CONFIG_INPUT 0x1E00
-#define OE_CONFIG_OUTPUT 0x01DE
+#define OE_CONFIG_OUTPUT 0xC11E
 #define DEBOUNCE_ENABLE 0x1E00
-#define DEBOUNCE_TIME 0x284
+#define DEBOUNCE_TIME 0x1E3
 #define IRQ_ENABLE 0x1E00
 #define LOW_LEVEL_DETECT 0x1E00
 #define CLEAR_IRQ 0x1E00
 #define FALLING_DETECT 0x1E00
-#define CLK_GPIO2_CONFIG 0x4002 // Enable + Optional features for deboucing
+#define CLK_GPIO2_CONFIG 0x40002 // Enable + Optional features for deboucing
 
+#define COL_MASK (C1_PIN | C2_PIN | C3_PIN)   // 0x0000C100
+#define ROW_MASK ( (1<<9) | (1<<10) | (1<<11) | (1<<12) ) // 0x1E00
 
 // Jiffies 
 
@@ -116,7 +121,7 @@ static const char keyboard_mapping[4][3] = {
     {'1', '2', '3'},
     {'4', '5', '6'},
     {'7', '8', '9'},
-    {'#', '0', '*'}
+    {'*', '0', '#'}
 };
 
 
@@ -128,7 +133,7 @@ static ssize_t td3driver_read(struct file *, char __user *, size_t, loff_t *);
 static ssize_t td3driver_write(struct file *, const char __user *, size_t, loff_t *);
 static int my_dev_uevent(struct device *, struct kobj_uevent_env *);
 
-static char buffer[4]; 
+static char buffer[5]; 
 static int char_count = 0; 
 
 static void __iomem *gpio2_base; 
@@ -150,21 +155,22 @@ static struct cdev td3driver_cdev;
 static char kb_read(void)
 {
     int col, row; 
-    char key; 
+    char key=0; 
     for(col = 0; col < 3; col++)
     {
-      iowrite32(C1_PIN, gpio2_base + GPIO_DATAOUT);
-      iowrite32(C2_PIN, gpio2_base + GPIO_DATAOUT); 
-      iowrite32(C3_PIN, gpio2_base + GPIO_DATAOUT); 
+      iowrite32(C1_PIN, gpio2_base + GPIO_SETDATAOUT);
+      iowrite32(C2_PIN, gpio2_base + GPIO_SETDATAOUT); 
+      iowrite32(C3_PIN, gpio2_base + GPIO_SETDATAOUT); 
       
+      if(col == 2) iowrite32(C3_PIN, gpio2_base + GPIO_CLEARDATAOUT);
       if(col == 0) iowrite32(C1_PIN, gpio2_base + GPIO_CLEARDATAOUT);
       if(col == 1) iowrite32(C2_PIN, gpio2_base + GPIO_CLEARDATAOUT);
-      if(col == 2) iowrite32(C3_PIN, gpio2_base + GPIO_CLEARDATAOUT);
 
       for(row = 9; row < 13; row++)
       {
-        if((ioread32(gpio2_base + GPIO_DATAIN) << row) == 0) 
+        if((ioread32(gpio2_base + GPIO_DATAIN) & (1u << row)) == 0) 
         {
+          printk(KERN_INFO "columna %d y fila %d\n", col, row);
           key = keyboard_mapping[col][row-9]; 
           return key;  
         }
@@ -173,6 +179,7 @@ static char kb_read(void)
 
     return key; 
 
+
 }
 
 
@@ -180,22 +187,34 @@ static char kb_read(void)
 static void kbread_timer_callback(struct timer_list *t)
 {
     char key = kb_read();
+
     if(key == 0) // buffer vacio
     {
       buffer[0] = '\0';
       char_count = 0; 
     } 
-    if(key == '*') 
+    else if(key == '#' && char_count == 4) 
     // reiniciar buffer 
     {
+      buffer[char_count] = '\0';
+      char_count = 0;
+      printk(KERN_INFO "Codigo ingresado: %s\n", buffer);
       buffer[0] = '\0';
       char_count = 0;
     }
+    else if(key == '#')
+    {
+      buffer[0]='\0';
+      char_count=0;
+    }
     else { 
-      buffer[char_count] = key; 
-      char_count++; 
-    } 
-    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(20));
+    if (char_count < sizeof(buffer) - 1) {
+        buffer[char_count++] = key;
+        printk(KERN_INFO "Tecla: %c\n", key); 
+        buffer[char_count] = '\0';
+        
+    } } 
+    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(200));
 }
 
 static void led_timer_callback(struct timer_list *t)
@@ -263,26 +282,42 @@ static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de la
     // Configuracion de CLK GPIO2
     iowrite32(CLK_GPIO2_CONFIG, cm_per_base + GPIO2_CLK_OFFSET); 
 
+    u32 clkconfig; 
+    clkconfig = ioread32(cm_per_base + GPIO2_CLK_OFFSET); 
+    printk(KERN_INFO "clkonfig RLED = 0x%08x\n", clkconfig);
+
+
 
     gpio2_base = ioremap(GPIO2_REGISTER, GPIO2_SIZE); 
     if(gpio2_base == NULL)
     {
-      iounmap(cm_base);
       iounmap(cm_per_base);
+      iounmap(cm_base);
       return -1;
     }  
 
-    // Verificar estado de reset
-    if(ioread32(gpio2_base + GPIO_SYSSTATUS)) printk("Reset realizado\n"); 
-    else printk("Reset no realizado\n"); 
+    if (!(ioread32(gpio2_base + GPIO_SYSSTATUS) & 0x1)) {
+    printk(KERN_ERR "GPIO2 no salió de reset, abortando probe\n");
+    iounmap(gpio2_base);
+    iounmap(cm_per_base);
+    iounmap(cm_base);
+    return -ENODEV;
+    }
 
     // Configurar E/S
-    u32 oe_register = ioread32(gpio2_base + GPIO_OE); 
-    oe_register &= ~OE_CONFIG_OUTPUT; 
-    oe_register |= OE_CONFIG_INPUT; 
-    printk(KERN_INFO "GPIO_OE = 0x%08x\n", oe_register);
+    u32 oe = ioread32(gpio2_base + GPIO_OE); 
+    
+/* columnas = salidas -> poner a 0 esos bits */
+    oe &= ~COL_MASK;
 
-    iowrite32(oe_register, gpio2_base + GPIO_OE); 
+/* filas = entradas -> poner a 1 esos bits */
+    oe |= ROW_MASK;
+
+    iowrite32(oe, gpio2_base + GPIO_OE);
+
+/* verificar leyendo de vuelta */
+    printk(KERN_INFO "OE after write = 0x%08x\n", ioread32(gpio2_base + GPIO_OE));
+
 
     // Activar debounce 
     iowrite32(DEBOUNCE_ENABLE, gpio2_base + GPIO_DEBOUNCENABLE); 
@@ -308,11 +343,32 @@ static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de la
     printk(KERN_INFO "cmconfig RLED = 0x%08x\n", cmconfig);
 
 
-    msleep(10000);
+    msleep(5000);
 
     iowrite32(1 << 3, gpio2_base + GPIO_CLEARDATAOUT); 
     printk(KERN_INFO "LED rojo apagado\n");
 
+    iowrite32(GLED_PIN, gpio2_base + GPIO_SETDATAOUT); 
+    printk(KERN_INFO "LED rojo encendido\n");
+    ioread32(gpio2_base + GPIO_DATAOUT); 
+
+    msleep(5000);
+
+    iowrite32(GLED_PIN, gpio2_base + GPIO_CLEARDATAOUT); 
+    printk(KERN_INFO "LED rojo apagado\n");
+
+    iowrite32(BUZZER_PIN, gpio2_base + GPIO_SETDATAOUT); 
+    printk(KERN_INFO "BUZZ encendido\n");
+    ioread32(gpio2_base + GPIO_DATAOUT); 
+
+    msleep(1000);
+
+    iowrite32(BUZZER_PIN, gpio2_base + GPIO_CLEARDATAOUT); 
+    printk(KERN_INFO "BUZZ apagado\n");
+
+
+
+    
     timer_setup(&kbread_timer, kbread_timer_callback, 0); 
     mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(20)); 
 
@@ -426,9 +482,9 @@ static void td3driver_exit( void )
   del_timer(&long_buzzer_timer); 
   del_timer(&led_timer); 
   del_timer(&kbread_timer); 
-  iounmap(cm_base); 
-  iounmap(cm_per_base);
   iounmap(gpio2_base); 
+  iounmap(cm_per_base);
+  iounmap(cm_base); 
   platform_driver_unregister(&td3_platform_driver);
   cdev_del(&td3driver_cdev);
   device_destroy( cl, dev );
