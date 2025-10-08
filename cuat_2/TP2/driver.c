@@ -76,7 +76,7 @@ enum {
 
 /* OFFSET FOR PINS */
 
-// KEYBOARD eight pins provisional
+// KEYBOARD 
 
 #define C1_OFFSET 0x8C4 // SALIDA C1 P8_38 2_15
 #define C1_PIN 79
@@ -90,7 +90,7 @@ enum {
 #define F4_OFFSET 0x8B8 // ENTRADA F4 P8_39 2_12
 
 
-static const u32 col_pins[3] = { C1_PIN, C2_PIN, C3_PIN };
+static const u32 col_pins[3] = { (1 << 15) , (1 << 14), (1 << 8) };
 
 // BUZZER 
 #define BUZZER_OFFSET 0x88C // SALIDA P8_18 2_1
@@ -120,14 +120,16 @@ static const u32 col_pins[3] = { C1_PIN, C2_PIN, C3_PIN };
 #define FALLING_DETECT 0x1E00
 #define CLK_GPIO2_CONFIG 0x40002 // Enable + Optional features for deboucing
 
-#define COL_MASK (C1_PIN | C2_PIN | C3_PIN)   // 0x0000C100
+#define COL_MASK (BUZZER_PIN | GLED_PIN | RLED_PIN  | (1 << 8) | (1 << 15 ) | (1 << 14))   // 0x0000C100
 #define ROW_MASK ( (1<<9) | (1<<10) | (1<<11) | (1<<12) ) // 0x1E00
 
-
+static DECLARE_WAIT_QUEUE_HEAD(wait_queue); 
+static int code_ready = 0; 
 static char prev_scan_key = 0;         /* última tecla leída por kb_read() */
 static char last_processed_key = 0;    /* última tecla ya procesada (evita repeticiones mientras se mantiene) */
 static int stable_count = 0;           /* cuantas lecturas consecutivas igual a prev_scan_key */
 #define STABLE_REQUIRED 2              /* requerir 2 lecturas iguales para considerar estable */
+static int col = 0; 
 // Jiffies 
 
 static struct timer_list kbread_timer; 
@@ -174,61 +176,55 @@ static struct cdev td3driver_cdev;
 
 static char kb_read(void)
 {
-    int col, row,c; 
+    int row,c; 
     char key=0; 
-    for(col = 0; col < 3; col++)
+    
+    for(c = 0; c < 3; c++)
     {
-      // Poner todas en 1
-      for(c = 0; c < 3; c++)
-      {
-        gpio_set_value(col_pins[c], 1);
-      }
+        iowrite32(col_pins[c], gpio2_base + GPIO_SETDATAOUT);
+    }
 
-      // Poner a 0 la columna actual
-      gpio_set_value(col_pins[col], 0);
-      udelay(500);
+    iowrite32(col_pins[col], gpio2_base + GPIO_CLEARDATAOUT);
+    udelay(10);
 
-      for(row = 9; row < 13; row++)
+    for(row = 9; row < 13; row++)
       {
         if((ioread32(gpio2_base + GPIO_DATAIN) & (1u << row)) == 0) 
         {
           printk(KERN_INFO "columna %d y fila %d\n", col, row);
           key = keyboard_mapping[row-9][col]; 
-          gpio_set_value(col_pins[col], 1);
+          iowrite32(1u << col_pins[col], gpio2_base + GPIO_SETDATAOUT);
+          col = 0; 
           return key;  
         }
-      }
     }
-
+    col++; 
+    if(col == 3) col = 0;  
+    
     return key; 
-
-
 }
 
 
 static void process_key(char key) {
-    /* lógica de procesado de una pulsación "válida" (se ejecuta una sola vez por pulsación) */
     if (key == '*') {
         if (char_count == 4) {
-            /* Trama completa: xxxx* */
             buffer[char_count] = '\0';
             printk(KERN_INFO "Codigo ingresado: %s\n", buffer);
+            // code_ready = 1;
+            // wake_up_interruptible(&wait_queue);
             char_count = 0;
             buffer[0] = '\0';
         } else {
-            /* Asterisco antes del final: reiniciar trama */
             char_count = 0;
             buffer[0] = '\0';
             printk(KERN_INFO "Asterisco prematuro -> reinicio trama\n");
         }
     } else {
-        /* Si no es asterisco, agregar dígito si hay espacio */
         if (char_count < (int)sizeof(buffer) - 1) {
             buffer[char_count++] = key;
             buffer[char_count] = '\0';
             printk(KERN_INFO "Tecla aceptada: %c  buffer: %s\n", key, buffer);
         } else {
-            /* buffer lleno: reiniciar (puedes cambiar política si quieres) */
             printk(KERN_INFO "Buffer overflow -> reinicio\n");
             char_count = 0;
             buffer[0] = '\0';
@@ -238,32 +234,16 @@ static void process_key(char key) {
 
 static void kbread_timer_callback(struct timer_list *t)
 {
-    char key = kb_read(); /* lee la tecla actual (0 si no hay) */
+    char key = kb_read(); 
+    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(60));
 
-    /* --- Debounce sencillo por software: requerimos STABLE_REQUIRED lecturas iguales --- */
-    if (key == prev_scan_key) {
+    if (key == 0) {
         stable_count++;
     } else {
-        prev_scan_key = key;
-        stable_count = 1;
+        process_key(key);
+
     }
 
-    /* Si la lectura está estableamos, actuamos sobre el flanco */
-    if (stable_count >= STABLE_REQUIRED) {
-        if (key != 0 && last_processed_key == 0) {
-            /* flanco 0 -> key (nueva pulsación estable) */
-            process_key(key);
-            last_processed_key = key; /* marcamos que ya procesamos esta pulsación hasta que se suelte */
-        } else if (key == 0) {
-            /* tecla liberada: permitimos procesar la próxima pulsación */
-            last_processed_key = 0;
-        }
-        /* si key != 0 pero last_processed_key != 0 -> tecla mantenida: no hacemos nada */
-    }
-
-    /* volver a programar timer.
-       Nota: podés aumentar a 30..50 ms si querés menos sensibilidad / menos CPU. */
-    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(30));
 }
 
 
@@ -375,23 +355,23 @@ static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de la
     // Tiempo de debounce 
     iowrite32(DEBOUNCE_TIME, gpio2_base + GPIO_DEBOUNCINGTIME); 
 
-    // Activar IRQ en las entradas 
-    iowrite32(IRQ_ENABLE, gpio2_base + GPIO_IRQSTATUS_SET_0); 
+    // // Activar IRQ en las entradas 
+    // iowrite32(IRQ_ENABLE, gpio2_base + GPIO_IRQSTATUS_SET_0); 
 
-    // Limpiar interrupciones por las dudas 
-    iowrite32(CLEAR_IRQ, gpio2_base + GPIO_IRQSTATUS_CLR_0);
+    // // Limpiar interrupciones por las dudas 
+    // iowrite32(CLEAR_IRQ, gpio2_base + GPIO_IRQSTATUS_CLR_0);
 
-    // Desactivar high level y activar low level (se hace solo x reset)
-    iowrite32(LOW_LEVEL_DETECT, gpio2_base + GPIO_LEVELDETECT0); 
+    // // Desactivar high level y activar low level (se hace solo x reset)
+    // iowrite32(LOW_LEVEL_DETECT, gpio2_base + GPIO_LEVELDETECT0); 
 
-    // Falling edge detect 
-    iowrite32(FALLING_DETECT, gpio2_base + GPIO_FALLINGDETECT); 
+    // // Falling edge detect 
+    // iowrite32(FALLING_DETECT, gpio2_base + GPIO_FALLINGDETECT); 
 
+    init_waitqueue_head(&wait_queue);
+    code_ready = 0;
 
-
-    
     timer_setup(&kbread_timer, kbread_timer_callback, 0); 
-    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(20)); 
+    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(60)); 
 
     timer_setup(&led_timer, led_timer_callback, 0);
     timer_setup(&long_buzzer_timer, long_buzzer_timer_callback, 0);
@@ -517,7 +497,10 @@ static void td3driver_exit( void )
 static ssize_t td3driver_read(struct file *filp, char __user *buf,
                               size_t count, loff_t *f_pos)
 {
-    printk(KERN_INFO "td3driver: read()\n");
+    // wait_event_interruptible(wait_queue, code_ready == 1); // bloquea hasta que haya código
+    // if(copy_to_user(buf, code_buffer, 5)) { return -1; }
+    // code_ready = 0;
+    // return 5;
     return 0; 
 }
 
