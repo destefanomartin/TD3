@@ -156,6 +156,7 @@ static ssize_t td3driver_write(struct file *, const char __user *, size_t, loff_
 static int my_dev_uevent(struct device *, struct kobj_uevent_env *);
 
 static char buffer[5]; 
+static char aux_buffer[5];
 static int char_count = 0; 
 
 static void __iomem *gpio2_base; 
@@ -210,8 +211,10 @@ static void process_key(char key) {
         if (char_count == 4) {
             buffer[char_count] = '\0';
             printk(KERN_INFO "Codigo ingresado: %s\n", buffer);
-            // code_ready = 1;
-            // wake_up_interruptible(&wait_queue);
+            code_ready = 1;
+            aux_buffer[0] = '\0';
+            memcpy(aux_buffer, buffer, 5);
+            wake_up_interruptible(&wait_queue);
             char_count = 0;
             buffer[0] = '\0';
         } else {
@@ -497,11 +500,12 @@ static void td3driver_exit( void )
 static ssize_t td3driver_read(struct file *filp, char __user *buf,
                               size_t count, loff_t *f_pos)
 {
-    // wait_event_interruptible(wait_queue, code_ready == 1); // bloquea hasta que haya código
-    // if(copy_to_user(buf, code_buffer, 5)) { return -1; }
-    // code_ready = 0;
-    // return 5;
-    return 0; 
+    wait_event_interruptible(wait_queue, code_ready == 1); // bloquea hasta que haya código
+    printk(KERN_INFO "SE VA A MANDAR CODIGO\n");
+    if(copy_to_user(buf, aux_buffer, 5)) { return -1; }
+    code_ready = 0;
+    aux_buffer[0] = '\0';
+    return 5;
 }
 
 static ssize_t td3driver_write(struct file *filp, const char __user *buf,
@@ -519,7 +523,6 @@ static ssize_t td3driver_write(struct file *filp, const char __user *buf,
     switch (args.command) {
     case CMD_BEEP:
         iowrite32(BUZZER_PIN, gpio2_base + GPIO_SETDATAOUT);
-        /* programar timer para apagar en args.millis * 10 ms */
         mod_timer(&short_buzzer_timer, jiffies + msecs_to_jiffies(args.millis * 10));
         break;
 

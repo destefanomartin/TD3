@@ -9,19 +9,84 @@
 #include <errno.h>
 #include <signal.h>
 #include <time.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <semaphore.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+
 
 #define MAX_CONN 1 //Nro maximo de conexiones en espera
+#define SEM_NAME "/shared_sem"
+#define SHM_KEY 0x1234
+#define MAX_CODES 100
+#define MAX_LOGS 100
+static int created_shm;
+static int created_sem;
 
-volatile int child_count = 0; 
-void sigchld_handler (int sig) {
-    int status; 
-    pid_t pid_handler = waitpid(-1, &status, WNOHANG); 
-    if(pid_handler > 0){
-        child_count = 0; 
-    }
-}
+
+struct arguments {
+    unsigned char command;
+    unsigned char millis;
+};
+
+// Enum para usar los mismos valores que el driver
+enum {
+    CMD_FORBIDDEN = 0,
+    CMD_BEEP = 1,
+    CMD_GREEN_LED,
+    CMD_RED_LED,
+    CMD_ORANGE_LED
+};
+
+
+typedef struct {
+    char code[5];  
+} CodeEntry;
+
+typedef struct {
+    char datetime[20]; // "YYYY-MM-DD HH:MM:SS"
+    char code[5];
+    int valid; // 1 válido, 0 inválido
+} LogEntry;
+
+typedef struct {
+    int num_codes;
+    int num_logs;
+    CodeEntry codes[MAX_CODES];
+    LogEntry logs[MAX_LOGS];
+} SharedData;
+
+
+void Remote_Access_Control ();
+int check_code(const char *code, SharedData *shared, sem_t *sem);
+void build_page(char *html, SharedData *shared, sem_t *sem);
+void register_log(const char *code,int result);
+void cleanup();
+void cleanup_and_kill_all(void);
+void sigint_handler(int sig);
 void ProcesarCliente(int fd_cliente, struct sockaddr_in *pDireccionCliente,
                      int puerto);
+
+SharedData *shared = NULL;
+sem_t *sem = NULL;
+int shmid = -1;
+
+volatile int child_count = 0; 
+
+
+void sigchld_handler (int sig) {
+    int status;
+    pid_t pid;
+    // reap all dead children
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        if (child_count > 0) child_count--;
+        // opcional: logear pid y estado
+        // printf("Child %d terminated\n", pid);
+}
+}
+
+
 
 
 
@@ -32,14 +97,51 @@ int main(int argc, char *argv[])
     int fd_server, pid_kb;
     struct sockaddr_in datosServidor;
     socklen_t longDirec;
+    struct sigaction sa;
+    sa.sa_handler = sigchld_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    sigaction(SIGCHLD, &sa, NULL);
 
 
-    // if (argc != 2)
-    // {
-    //     printf("\n\nLinea de comandos: webserver Puerto\n\n");
-    //     exit(1);
-    // }
-    // Creamos el socket
+    shmid = shmget(SHM_KEY, sizeof(SharedData), IPC_CREAT | IPC_EXCL | 0660);
+    if (shmid < 0) {
+        if (errno == EEXIST) {
+            shmid = shmget(SHM_KEY, sizeof(SharedData), 0660);
+            if (shmid < 0) { perror("shmget existing"); exit(1); }
+        } else {
+            perror("Error creando memoria compartida");
+            exit(1);
+        }
+    } else {
+        created_shm = 1;
+    }
+
+    shared = (SharedData *)shmat(shmid, NULL, 0);
+    if (shared == (void *)-1) {
+        perror("Error mapeando memoria compartida");
+        exit(1);
+    }
+
+    /* Limpiar siempre */
+    memset(shared, 0, sizeof(SharedData));
+
+    /* ----- Inicializar semáforo y detectar si fue creado ----- */
+    sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0666, 1);
+    if (sem == SEM_FAILED) {
+        if (errno == EEXIST) {
+            sem = sem_open(SEM_NAME, 0);
+            if (sem == SEM_FAILED) { perror("sem_open existing"); exit(1); }
+        } else {
+            perror("sem_open");
+            exit(1);
+        }
+    } else {
+        created_sem = 1;
+    }
+
+
+
     fd_server = socket(AF_INET, SOCK_STREAM,0);
     if (fd_server == -1)
     {
@@ -68,7 +170,10 @@ int main(int argc, char *argv[])
         close(fd_server);
         exit(1);
     }
-
+    if (setpgid(0, 0) != 0) {
+    perror("setpgid");
+    // no fatal, pero conviene continuar
+    }
     pid_kb = fork(); 
     if(pid_kb < 0)
     {
@@ -82,7 +187,7 @@ int main(int argc, char *argv[])
     }
 
     signal(SIGCHLD, sigchld_handler);
-
+    signal(SIGINT, sigint_handler);
     // Permite atender a multiples usuarios
     while (1)
     {
@@ -90,7 +195,7 @@ int main(int argc, char *argv[])
         struct sockaddr_in datosCliente;
         longDirec = sizeof(datosCliente);
 
-        if(child_count == 0) { // Limit connection to 1 client once
+        if(child_count >= 0) { // Limit connection to 1 client once
             fd_cliente = accept(fd_server, (struct sockaddr*) &datosCliente, &longDirec);
             if (fd_cliente < 0)
             {
@@ -108,13 +213,17 @@ int main(int argc, char *argv[])
         }
         if (pid == 0)
         {       // Proceso hijo.
-        child_count++; 
+
         ProcesarCliente(fd_cliente, &datosCliente, 8080);
         exit(0);
         }
-        close(fd_cliente);  // El proceso padre debe cerrar el socket
-                    // que usa el hijo.
+        child_count++;   // padre incrementa
+        close(fd_cliente);
+
+
     }
+        cleanup(); // Si llega al final normalmente
+        return 0;
 }
 
 
@@ -134,36 +243,33 @@ void ProcesarCliente(int fd_cliente, struct sockaddr_in *pDireccionCliente, int 
     }
     bufferComunic[n] = '\0'; // asegurar string
 
-    if (strncmp(bufferComunic, "GET", 3) == 0) { // Metodo para cuando se solicita la pagina 
-    // Es un GET
-    printf("Se recibió GET\n");
-    strcpy(ipAddr, inet_ntoa(pDireccionCliente->sin_addr));
-    Port = ntohs(pDireccionCliente->sin_port);
+    if (strncmp(bufferComunic, "GET", 3) == 0) {
+        char html[16384];
+        build_page(html, shared, sem);
 
-    // Generar página HTML completa
-    char html[16384];
-    build_page(html);
-
-    // Enviar respuesta HTTP
-    char header[256];
-    sprintf(header,
+        char header[512];
+        sprintf(header,
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: text/html; charset=UTF-8\r\n"
+            "Cache-Control: no-store, no-cache, must-revalidate\r\n"
+            "Pragma: no-cache\r\n"
+            "Expires: 0\r\n"
             "Content-Length: %zu\r\n"
             "Connection: close\r\n\r\n",
             strlen(html));
 
-    write(fd_cliente, header, strlen(header));
-    write(fd_cliente, html, strlen(html));
-    sleep(10);
-  // Cierra la conexion con el cliente actual
-    close(fd_cliente);    
-}
+        write(fd_cliente, header, strlen(header));
+        write(fd_cliente, html, strlen(html));
+        close(fd_cliente);
+    }
+
 else if (strncmp(bufferComunic, "POST", 4) == 0) {
+    // Parse Content-Length
     char *cl = strcasestr(bufferComunic, "Content-Length:");
     int content_length = 0;
     if (cl) sscanf(cl, "Content-Length: %d", &content_length);
 
+    // Obtener cuerpo
     char *body = strstr(bufferComunic, "\r\n\r\n");
     if (!body) { close(fd_cliente); return; }
     body += 4;
@@ -176,51 +282,62 @@ else if (strncmp(bufferComunic, "POST", 4) == 0) {
     }
     body[body_len] = '\0';
 
-    char codigo[32] = {0};
-    sscanf(body, "codigo=%31s", codigo);
-
+    char codigo[5] = {0};
+    sscanf(body, "codigo=%4s", codigo); // <= 4 chars
     if (strstr(bufferComunic, "POST /agregar") != NULL) {
-        FILE *fa = fopen("allowed.txt", "a");
-        if (fa) {
-            fprintf(fa, "%s\n", codigo);
-            fclose(fa);
+        sem_wait(sem);
+        if (shared->num_codes < MAX_CODES) {
+            strcpy(shared->codes[shared->num_codes].code, codigo);
+            shared->num_codes++;
+            // fd_driver = open("/dev/td3driver", O_RDWR);
+            // if(fd_driver < 0)
+            // {   
+            //     perror("No se pudo abrir el driver\n"); 
+            //     exit(1); 
+            // }
+            // arg_sv.command = CMD_ORANGE_LED;
+            // arg_sv.millis = 100; // 200 ms
+            // write(fd_driver, &arg_sv, sizeof(arg_sv));
+
+            // arg_sv.command = CMD_BEEP; 
+            // arg_sv.millis = 20; // 200 ms
+            // write(fd_driver, &arg_sv, sizeof(arg_sv));
         }
-        printf("Agregado: %s\n", codigo);
+        sem_post(sem);
     }
     else if (strstr(bufferComunic, "POST /eliminar") != NULL) {
-        char line[64];
-        FILE *fa = fopen("allowed.txt", "r");
-        FILE *tmp = fopen("allowed.tmp", "w");
-        if (fa && tmp) {
-            while (fgets(line, sizeof(line), fa)) {
-                line[strcspn(line, "\n")] = 0;
-                if (strcmp(line, codigo) != 0) {
-                    fprintf(tmp, "%s\n", line);
-                }
+        sem_wait(sem);
+        for (int i = 0; i < shared->num_codes; i++) {
+            if (strcmp(shared->codes[i].code, codigo) == 0) {
+                for (int j = i; j < shared->num_codes - 1; j++)
+                    shared->codes[j] = shared->codes[j + 1];
+                shared->num_codes--;
+                break;
             }
         }
-        if (fa) fclose(fa);
-        if (tmp) fclose(tmp);
-        if (remove("allowed.txt") != 0) perror("remove");
-        if (rename("allowed.tmp", "allowed.txt") != 0) perror("rename");
-        printf("Eliminado: %s\n", codigo);
+        sem_post(sem);
     }
 
     char html[16384];
-    build_page(html);
+    build_page(html, shared, sem);
 
     char header[256];
     sprintf(header,
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/html; charset=UTF-8\r\n"
-            "Content-Length: %zu\r\n"
-            "Connection: close\r\n\r\n",
-            strlen(html));
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/html; charset=UTF-8\r\n"
+        "Cache-Control: no-store, no-cache, must-revalidate\r\n"
+        "Pragma: no-cache\r\n"
+        "Expires: 0\r\n"
+        "Content-Length: %zu\r\n"
+        "Connection: close\r\n\r\n",
+        strlen(html));
 
     write(fd_cliente, header, strlen(header));
     write(fd_cliente, html, strlen(html));
 
+    
     close(fd_cliente);
+
 }
 
 }
@@ -228,61 +345,100 @@ else if (strncmp(bufferComunic, "POST", 4) == 0) {
 
 void Remote_Access_Control ()
 {
-    char code[4] = "5555"; 
+    int fd_driver; 
+    char code[5] = {0}; 
+    struct arguments args; 
+
+    fd_driver = open("/dev/td3driver", O_RDWR); 
+    if(fd_driver < 0)
+    {   
+        perror("No se pudo abrir el driver\n"); 
+        exit(1); 
+    }
     while(1){
-        if(check_code(code))
+        int n = read(fd_driver, code, 5);
+        if (n < 0) {
+            perror("Error leyendo del driver");
+            code[4] = '\0';
+            continue;
+        } else if (n != 5) {
+            fprintf(stderr, "Leí %d bytes, se esperaban 5\n", n);
+            code[4] = '\0';
+            continue;
+        }
+        code[4] = '\0';
+
+
+        printf("Codigo recibido: %s\n", code);
+
+        if (check_code(code, shared, sem))        
         {
             printf("codigo ingreso valido\n");  // boton verde
             register_log(code, 1);
+            args.command = CMD_GREEN_LED;
+            args.millis = 100; // 200 ms
+            write(fd_driver, &args, sizeof(args));
+
+            args.command = CMD_BEEP;
+            args.millis = 10; // 100 ms
+            write(fd_driver, &args, sizeof(args));
         } 
         else 
         {
-            printf("codigo invalido\n"); 
-            register_log(code, 0); 
+            printf("codigo ingreso invalido\n"); // boton rojo
+            register_log(code, 0);
+            args.command = CMD_RED_LED;
+            args.millis = 100; // 200 ms
+            write(fd_driver, &args, sizeof(args));
+
+            args.command = CMD_BEEP;
+            args.millis = 10; // 100 ms
+            write(fd_driver, &args, sizeof(args));
         }
     }
-    exit(0);
+    close(fd_driver);
 
 }
 
-void register_log(int code,int result) // funciones q me sirven despues 
-{
-    FILE *access_file; 
-    if(access_file= fopen("access.log", "a")==1)
-    {
-        time_t now = time(NULL); 
+void register_log(const char *code, int result) {
+    sem_wait(sem);
+
+    if (shared->num_logs < MAX_LOGS) {
+        time_t now = time(NULL);
         struct tm *tm_info = localtime(&now);
-        char timebuf[64]; 
-        strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S", tm_info);
-        
-        fprintf(access_file, "[%s] Codigo %s -> %s\n",
-            timebuf, code, result ? "VALIDO" : "INVALIDO");
-        fclose(access_file);  
-        return 0;  
+        printf("Registrando log: '%s', resultado=%d\n", code, result);
+        strftime(shared->logs[shared->num_logs].datetime, sizeof(shared->logs[0].datetime), "%Y-%m-%d %H:%M:%S", tm_info);
+        // Copiar los primeros 5 caracteres y asegurar '\0'
+        strncpy(shared->logs[shared->num_logs].code, code, 5);
+        shared->logs[shared->num_logs].code[4] = '\0';
+
+        shared->logs[shared->num_logs].valid = result;
+        shared->num_logs++;
     }
-    else return 1; 
-    
+
+    sem_post(sem);
 }
 
-int check_code(const char* code) // funciones q me sirven despues 
-{
-    FILE *allowed_file = fopen("allowed.txt", "r"); 
-    if(!allowed_file) return 0; 
-    char line[64];
-    while (fgets(line, sizeof(line), allowed_file)) {
-        line[strcspn(line, "\n")] = 0;
-        if (strcmp(line, code) == 0) {
-            fclose(allowed_file);
-            return 1;
+int check_code(const char *code, SharedData *shared, sem_t *sem) {
+    int found = 0;
+    sem_wait(sem);
+    for (int i = 0; i < shared->num_codes; i++) {
+        // Comparar siempre los primeros 4 caracteres
+        if (strncmp(shared->codes[i].code, code, 4) == 0) {
+            printf("Código encontrado: %s\n", code);
+            found = 1;
+            break;
         }
     }
-    fclose(allowed_file);
-    return 0;
+    sem_post(sem);
+    return found;
 }
 
 
-void build_page(char *html){
-        FILE *tpl = fopen("index.html", "r");
+
+
+void build_page(char *html, SharedData *shared, sem_t *sem) {
+    FILE *tpl = fopen("index.html", "r");
     if (!tpl) {
         strcpy(html, "<h1>Error: no se encuentra index.html</h1>");
         return;
@@ -290,33 +446,85 @@ void build_page(char *html){
 
     char line[1024];
     html[0] = '\0';
-    int id = 1;
 
+    sem_wait(sem);
     while (fgets(line, sizeof(line), tpl)) {
         if (strstr(line, "<!--CODES-->")) {
-            FILE *fa = fopen("allowed.txt", "r");
-            if (fa) {
-                char code[16];
-                while (fgets(code, sizeof(code), fa)) {
-                    code[strcspn(code, "\n")] = 0; // sacar \n
-                    char row[64];
-                    sprintf(row, "<tr><td>%d</td><td>%s</td></tr>\n", id++, code);
-                    strcat(html, row);
-                }
-                fclose(fa);
+            for (int i = 0; i < shared->num_codes; i++) {
+                char row[64];
+                sprintf(row, "<tr><td>%s</td></tr>\n", shared->codes[i].code);
+                strcat(html, row);
             }
         } else if (strstr(line, "<!--LOG-->")) {
-            FILE *fl = fopen("access.log", "r");
-            if (fl) {
-                char entry[128];
-                while (fgets(entry, sizeof(entry), fl)) {
-                    strcat(html, entry);
-                }
-                fclose(fl);
+            for (int i = 0; i < shared->num_logs; i++) {
+                char row[128];
+                sprintf(row,
+                    "<tr><td>%s</td><td>%s</td><td>%s</td></tr>\n",
+                    shared->logs[i].datetime,
+                    shared->logs[i].code,
+                    shared->logs[i].valid ? "Válido" : "Inválido");
+                strcat(html, row);
             }
         } else {
             strcat(html, line);
         }
     }
+    sem_post(sem);
     fclose(tpl);
+}
+
+void cleanup() {
+    if (shared != NULL) {
+        shmdt(shared);
+        shared = NULL;
+    }
+    if (shmid > 0 && created_shm) {
+        shmctl(shmid, IPC_RMID, NULL);
+        shmid = -1;
+    }
+    if (sem != NULL) {
+        sem_close(sem);
+        sem = NULL;
+    }
+    if (created_sem) {
+        sem_unlink(SEM_NAME);
+    }
+    printf("Recursos liberados correctamente.\n");
+}
+
+void sigint_handler(int sig) {
+    printf("\nCerrando servidor (SIGINT/SIGTERM)...\n");
+    cleanup_and_kill_all();
+    // After kill, exit
+    _exit(0);
+}
+
+void cleanup_and_kill_all(void) {
+    pid_t pgid = getpgrp(); // PGID del grupo del proceso actual
+    // enviar SIGTERM a todo el grupo de procesos (incluye a este proceso)
+    if (killpg(pgid, SIGTERM) == -1) {
+        perror("killpg");
+    }
+    // esperar un momento que los procesos terminen (opcional)
+    sleep(1);
+
+    // limpieza de recursos compartidos y semáforo
+    if (shared != NULL) {
+        shmdt(shared);
+        shared = NULL;
+    }
+    if (shmid > 0 && created_shm) {
+        shmctl(shmid, IPC_RMID, NULL);
+        shmid = -1;
+    }
+
+    if (sem != NULL) {
+        sem_close(sem);
+        sem = NULL;
+    }
+    if (created_sem) {
+        sem_unlink(SEM_NAME);
+    }
+
+    printf("Recursos liberados.\n");
 }
