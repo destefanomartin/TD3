@@ -211,8 +211,11 @@ static void process_key(char key) {
         if (char_count == 4) {
             buffer[char_count] = '\0';
             printk(KERN_INFO "Codigo ingresado: %s\n", buffer);
+            if (code_ready) {
+                printk(KERN_WARNING "Codigo anterior no leido, se descarta el nuevo\n");
+                return;
+            }
             code_ready = 1;
-            aux_buffer[0] = '\0';
             memcpy(aux_buffer, buffer, 5);
             wake_up_interruptible(&wait_queue);
             char_count = 0;
@@ -340,15 +343,12 @@ static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de la
     // Configurar E/S
     u32 oe = ioread32(gpio2_base + GPIO_OE); 
     
-/* columnas = salidas -> poner a 0 esos bits */
     oe &= ~COL_MASK;
 
-/* filas = entradas -> poner a 1 esos bits */
     oe |= ROW_MASK;
 
     iowrite32(oe, gpio2_base + GPIO_OE);
 
-/* verificar leyendo de vuelta */
     printk(KERN_INFO "OE after write = 0x%08x\n", ioread32(gpio2_base + GPIO_OE));
 
 
@@ -502,7 +502,10 @@ static ssize_t td3driver_read(struct file *filp, char __user *buf,
 {
     wait_event_interruptible(wait_queue, code_ready == 1); // bloquea hasta que haya código
     printk(KERN_INFO "SE VA A MANDAR CODIGO\n");
-    if(copy_to_user(buf, aux_buffer, 5)) { return -1; }
+    if(copy_to_user(buf, aux_buffer, 5)) { 
+        printk(KERN_ALERT "error escritura codigo desde kb"); 
+        return -1; 
+    }
     code_ready = 0;
     aux_buffer[0] = '\0';
     return 5;

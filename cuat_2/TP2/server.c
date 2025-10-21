@@ -14,8 +14,10 @@
 #include <semaphore.h>
 #include <fcntl.h>
 #include <sys/wait.h>
+#include <pthread.h>
 
 
+#define EVENT_SEM_NAME "/event_sem"
 #define MAX_CONN 1 //Nro maximo de conexiones en espera
 #define SEM_NAME "/shared_sem"
 #define SHM_KEY 0x1234
@@ -71,26 +73,19 @@ void ProcesarCliente(int fd_cliente, struct sockaddr_in *pDireccionCliente,
 SharedData *shared = NULL;
 sem_t *sem = NULL;
 int shmid = -1;
+sem_t *event_sem = NULL;
 
 volatile int child_count = 0; 
 
-
-void sigchld_handler (int sig) {
+void sigchld_handler(int sig) {
     int status;
     pid_t pid;
-    // reap all dead children
+
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        if (child_count > 0) child_count--;
-        // opcional: logear pid y estado
-        // printf("Child %d terminated\n", pid);
+        if (child_count > 0)
+            child_count--;
+    }
 }
-}
-
-
-
-
-
-
 
 int main(int argc, char *argv[])
 {
@@ -117,6 +112,7 @@ int main(int argc, char *argv[])
         created_shm = 1;
     }
 
+    
     shared = (SharedData *)shmat(shmid, NULL, 0);
     if (shared == (void *)-1) {
         perror("Error mapeando memoria compartida");
@@ -140,6 +136,21 @@ int main(int argc, char *argv[])
         created_sem = 1;
     }
 
+    event_sem = sem_open(EVENT_SEM_NAME, O_CREAT | O_EXCL, 0666, 0);
+    if (event_sem == SEM_FAILED) {
+        if (errno == EEXIST) {
+            event_sem = sem_open(EVENT_SEM_NAME, 0);
+            if (event_sem == SEM_FAILED) {
+                perror("sem_open event existing");
+                exit(1);
+            }
+        } else {
+            perror("sem_open event");
+            exit(1);
+        }
+    } else {
+        /* marcado creado? podrías llevar created_event_sem si quieres limpiar */
+    }
 
 
     fd_server = socket(AF_INET, SOCK_STREAM,0);
@@ -195,35 +206,44 @@ int main(int argc, char *argv[])
         struct sockaddr_in datosCliente;
         longDirec = sizeof(datosCliente);
 
-        if(child_count >= 0) { // Limit connection to 1 client once
-            fd_cliente = accept(fd_server, (struct sockaddr*) &datosCliente, &longDirec);
-            if (fd_cliente < 0)
-            {
-                perror("Accept error"); // Checks error on accept
-                close(fd_cliente); 
-                exit(1); 
-            }
+        // Esperar hasta que no haya hijos activos
+        while (child_count >= 1) {
+            sleep(1);
+        }
+
+        // Aceptar cliente
+        for (;;) {
+            fd_cliente = accept(fd_server, (struct sockaddr*)&datosCliente, &longDirec);
+            if (fd_cliente >= 0) break;           
+            if (errno == EINTR) continue;         // señal interrumpió, reintentar
+            perror("accept");
+            sleep(1);                             // espera antes de volver a intentar
         }
         pid = fork();
         if (pid < 0)
         {
-        perror("No se puede crear un nuevo proceso mediante fork");
-        close(fd_cliente);
-        exit(1);
+            perror("No se puede crear un nuevo proceso mediante fork");
+            close(fd_cliente);
+            continue;
         }
         if (pid == 0)
-        {       // Proceso hijo.
-
-        ProcesarCliente(fd_cliente, &datosCliente, 8080);
-        exit(0);
+        {   
+            ProcesarCliente(fd_cliente, &datosCliente, 8080);
+            close(fd_cliente);
+            exit(0);
         }
         child_count++;   // padre incrementa
         close(fd_cliente);
 
 
     }
-        cleanup(); // Si llega al final normalmente
-        return 0;
+        cleanup(0); // Si llega al final normalmente
+    if (fd_server >= 0) {
+        close(fd_server);
+        fd_server = -1;
+    }
+
+    return 0;
 }
 
 
@@ -235,6 +255,7 @@ void ProcesarCliente(int fd_cliente, struct sockaddr_in *pDireccionCliente, int 
     int Port;
     int indiceEntrada;
     char HTML[4096];
+    int code_exist = 0; 
 
     int n = read(fd_cliente, bufferComunic, sizeof(bufferComunic)-1);
     if (n <= 0) {
@@ -286,22 +307,22 @@ else if (strncmp(bufferComunic, "POST", 4) == 0) {
     sscanf(body, "codigo=%4s", codigo); // <= 4 chars
     if (strstr(bufferComunic, "POST /agregar") != NULL) {
         sem_wait(sem);
-        if (shared->num_codes < MAX_CODES) {
+
+        // Verificar si el código ya existe
+        for (int i = 0; i < shared->num_codes; i++) {
+            if (strncmp(shared->codes[i].code, codigo, 4) == 0) {
+                code_exist = 1;
+                break;
+            }
+        }
+        if (shared->num_codes < MAX_CODES && !code_exist) {
             strcpy(shared->codes[shared->num_codes].code, codigo);
             shared->num_codes++;
-            // fd_driver = open("/dev/td3driver", O_RDWR);
-            // if(fd_driver < 0)
-            // {   
-            //     perror("No se pudo abrir el driver\n"); 
-            //     exit(1); 
-            // }
-            // arg_sv.command = CMD_ORANGE_LED;
-            // arg_sv.millis = 100; // 200 ms
-            // write(fd_driver, &arg_sv, sizeof(arg_sv));
-
-            // arg_sv.command = CMD_BEEP; 
-            // arg_sv.millis = 20; // 200 ms
-            // write(fd_driver, &arg_sv, sizeof(arg_sv));
+            if (event_sem != NULL) {
+                if (sem_post(event_sem) == -1) {
+                    perror("sem_post event_sem");
+                }
+            }
         }
         sem_post(sem);
     }
@@ -339,7 +360,35 @@ else if (strncmp(bufferComunic, "POST", 4) == 0) {
     close(fd_cliente);
 
 }
+}
 
+struct notify_arg {
+    int fd_driver;
+    sem_t *event_sem;
+};
+
+
+void *notification_thread(void *arg) {
+    struct notify_arg *na = (struct notify_arg *)arg;
+    struct arguments args;
+
+    while (1) {
+        if (sem_wait(na->event_sem) == -1) {
+            if (errno == EINTR) continue;
+            perror("sem_wait event_sem");
+            break;
+        }
+        printf("[Hilo notificación] Nuevo código agregado desde la web\n");
+
+        args.command = CMD_ORANGE_LED;
+        args.millis = 100;
+        write(na->fd_driver, &args, sizeof(args));
+
+        args.command = CMD_BEEP;
+        args.millis = 10;
+        write(na->fd_driver, &args, sizeof(args));
+    }
+    return NULL;
 }
 
 
@@ -354,6 +403,19 @@ void Remote_Access_Control ()
     {   
         perror("No se pudo abrir el driver\n"); 
         exit(1); 
+    }
+
+    pthread_t tid;
+    struct notify_arg *na = malloc(sizeof(*na));
+    na->fd_driver = fd_driver;
+    na->event_sem = event_sem;
+
+    /* El proceso hijo hereda event_sem del padre (semáforo nombrado) */
+    if (pthread_create(&tid, NULL, notification_thread, na) != 0) {
+        perror("pthread_create notification_thread");
+        free(na);
+    } else {
+        pthread_detach(tid);  // no necesitamos join
     }
     while(1){
         int n = read(fd_driver, code, 5);
@@ -473,58 +535,45 @@ void build_page(char *html, SharedData *shared, sem_t *sem) {
     fclose(tpl);
 }
 
-void cleanup() {
-    if (shared != NULL) {
-        shmdt(shared);
-        shared = NULL;
-    }
-    if (shmid > 0 && created_shm) {
-        shmctl(shmid, IPC_RMID, NULL);
-        shmid = -1;
-    }
-    if (sem != NULL) {
-        sem_close(sem);
-        sem = NULL;
-    }
-    if (created_sem) {
-        sem_unlink(SEM_NAME);
-    }
-    printf("Recursos liberados correctamente.\n");
-}
 
 void sigint_handler(int sig) {
-    printf("\nCerrando servidor (SIGINT/SIGTERM)...\n");
-    cleanup_and_kill_all();
-    // After kill, exit
+    cleanup(1);   // mata hijos y limpia todo
     _exit(0);
 }
 
-void cleanup_and_kill_all(void) {
-    pid_t pgid = getpgrp(); // PGID del grupo del proceso actual
-    // enviar SIGTERM a todo el grupo de procesos (incluye a este proceso)
-    if (killpg(pgid, SIGTERM) == -1) {
-        perror("killpg");
-    }
-    // esperar un momento que los procesos terminen (opcional)
-    sleep(1);
 
-    // limpieza de recursos compartidos y semáforo
+void cleanup(int kill_children) {
+    if (kill_children) {
+        pid_t pgid = getpgrp();
+        killpg(pgid, SIGTERM);
+        sleep(1);  // tiempo para que mueran los hijos
+    }
+
+
     if (shared != NULL) {
         shmdt(shared);
         shared = NULL;
     }
-    if (shmid > 0 && created_shm) {
+
+    if (created_shm) {
         shmctl(shmid, IPC_RMID, NULL);
-        shmid = -1;
+        created_shm = 0;
     }
 
     if (sem != NULL) {
         sem_close(sem);
         sem = NULL;
     }
+
     if (created_sem) {
         sem_unlink(SEM_NAME);
+        created_sem = 0;
     }
 
-    printf("Recursos liberados.\n");
+    if (event_sem != NULL) {
+        sem_close(event_sem);
+        event_sem = NULL;
+    }
+
+    sem_unlink(EVENT_SEM_NAME);
 }
