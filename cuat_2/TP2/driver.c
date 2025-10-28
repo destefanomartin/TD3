@@ -19,10 +19,10 @@
 
 struct arguments {
     u8 command;
-    u8 millis;   /* tens of milliseconds (i.e. 20 => 200 ms) */
+    u8 millis;   
 };
 
-/* Comandos */
+/* Commands */
 enum {
     CMD_FORBIDDEN = 0,
     CMD_BEEP = 1,
@@ -106,14 +106,14 @@ static const u32 col_pins[3] = { (1 << 15) , (1 << 14), (1 << 8) };
 #define BLED_PIN (1 << 4)
 
 
-// Valores para pines 
+// Values for configs
 
 #define GPIO_INPUT 0x77 // (1110111)
 #define GPIO_OUTPUT 0x5F
 #define OE_CONFIG_INPUT 0x1E00
 #define OE_CONFIG_OUTPUT 0xC11E
 #define DEBOUNCE_ENABLE 0x1E00
-#define DEBOUNCE_TIME 0x285
+#define DEBOUNCE_TIME 0xFF
 #define IRQ_ENABLE 0x1E00
 #define LOW_LEVEL_DETECT 0x1E00
 #define CLEAR_IRQ 0x1E00
@@ -125,16 +125,15 @@ static const u32 col_pins[3] = { (1 << 15) , (1 << 14), (1 << 8) };
 
 static DECLARE_WAIT_QUEUE_HEAD(wait_queue); 
 static int code_ready = 0; 
-static char prev_scan_key = 0;         /* última tecla leída por kb_read() */
-static char last_processed_key = 0;    /* última tecla ya procesada (evita repeticiones mientras se mantiene) */
-static int stable_count = 0;           /* cuantas lecturas consecutivas igual a prev_scan_key */
-#define STABLE_REQUIRED 2              /* requerir 2 lecturas iguales para considerar estable */
+static int key_pressed = 0;                    /* check for key press */
+static unsigned long last_key_time = 0;        
+#define DEBOUNCE_SW_MS 150                     /* min time between two press keys */
+
 static int col = 0; 
 // Jiffies 
 
 static struct timer_list kbread_timer; 
 static struct timer_list led_timer; 
-static struct timer_list long_buzzer_timer; 
 static struct timer_list short_buzzer_timer; 
 
 // Lectura y escritura 
@@ -147,10 +146,11 @@ static const char keyboard_mapping[4][3] = {
 };
 
 
-MODULE_LICENSE("Dual BSD/GPL"); // Requerido
+MODULE_LICENSE("Dual BSD/GPL"); // Requiered
 MODULE_AUTHOR("Martin Destefano");
-MODULE_DESCRIPTION("");
+MODULE_DESCRIPTION("This driver configures the GPIOs to control the outputs and inputs of a keyboard + LED + buzzer set, allowing read and write operations from a process that is part of a server used for access control visualization.");
 
+/* All static for preserve data and avoid unnecessary memory allocation */
 static ssize_t td3driver_read(struct file *, char __user *, size_t, loff_t *);
 static ssize_t td3driver_write(struct file *, const char __user *, size_t, loff_t *);
 static int my_dev_uevent(struct device *, struct kobj_uevent_env *);
@@ -163,7 +163,7 @@ static void __iomem *gpio2_base;
 static void __iomem *cm_base; 
 static void __iomem *cm_per_base; 
 
-static dev_t dev; // Todo estatico para que no se meta dentro del Kernel
+static dev_t dev; 
 static struct class *cl; 
 
 struct file_operations td3driver_fops =
@@ -174,7 +174,7 @@ struct file_operations td3driver_fops =
 };
 static struct cdev td3driver_cdev;
 
-
+/* Keyboard read function 1 column write per 50ms */
 static char kb_read(void)
 {
     int row,c; 
@@ -192,7 +192,7 @@ static char kb_read(void)
       {
         if((ioread32(gpio2_base + GPIO_DATAIN) & (1u << row)) == 0) 
         {
-          printk(KERN_INFO "columna %d y fila %d\n", col, row);
+          printk(KERN_INFO "columna %d y fila %d\n", col, row); 
           key = keyboard_mapping[row-9][col]; 
           iowrite32(1u << col_pins[col], gpio2_base + GPIO_SETDATAOUT);
           col = 0; 
@@ -205,7 +205,7 @@ static char kb_read(void)
     return key; 
 }
 
-
+/* Process key pressed - check if key is empty, * or a number */
 static void process_key(char key) {
     if (key == '*') {
         if (char_count == 4) {
@@ -230,6 +230,8 @@ static void process_key(char key) {
             buffer[char_count++] = key;
             buffer[char_count] = '\0';
             printk(KERN_INFO "Tecla aceptada: %c  buffer: %s\n", key, buffer);
+            iowrite32(BUZZER_PIN, gpio2_base + GPIO_SETDATAOUT);
+            mod_timer(&short_buzzer_timer, jiffies + msecs_to_jiffies(50)); // Short beep for check 
         } else {
             printk(KERN_INFO "Buffer overflow -> reinicio\n");
             char_count = 0;
@@ -238,36 +240,37 @@ static void process_key(char key) {
     }
 }
 
+/* Jiffies callback for keyboard -> call the read function and do a software debounce for avoid double touches */
 static void kbread_timer_callback(struct timer_list *t)
 {
     char key = kb_read(); 
-    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(60));
+    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(50));
 
-    if (key == 0) {
-        stable_count++;
-    } else {
-        process_key(key);
+    if (key != 0 && !key_pressed) {
+        unsigned long now = jiffies;
 
+        // Compare kernels times 
+        if (time_after(now, last_key_time + msecs_to_jiffies(DEBOUNCE_SW_MS))) { 
+            process_key(key);
+            key_pressed = 1;
+            last_key_time = now;
+        }
+
+    } else if (key == 0) { // no key pressed
+        key_pressed = 0;
     }
 
 }
 
-
+/* JIffies callback for led -> activate from new code / invalid or valid code */
 static void led_timer_callback(struct timer_list *t)
 {
-    // Logica apagado ( no se renueva, se activa cuando se ingresa un codigo correcto, erroneo o nuevo)
     iowrite32(RLED_PIN, gpio2_base + GPIO_CLEARDATAOUT); 
     iowrite32(GLED_PIN, gpio2_base + GPIO_CLEARDATAOUT);
-    iowrite32(BLED_PIN, gpio2_base + GPIO_CLEARDATAOUT);
+    // iowrite32(BLED_PIN, gpio2_base + GPIO_CLEARDATAOUT); 
 }
 
-static void long_buzzer_timer_callback(struct timer_list *t)
-{
-    // Logica apagado ( no se renueva timer, se activa cuando se recibe un codigo nuevo )
-    iowrite32(BUZZER_PIN, gpio2_base + GPIO_CLEARDATAOUT);
-
-}
-
+/* Jiffies callback for short buzzer -> activate from key press or code read */
 static void short_buzzer_timer_callback(struct timer_list *t)
 {
     // Logica apagado ( no se renueva, se activa con codigo correcto u erroneo )
@@ -276,14 +279,13 @@ static void short_buzzer_timer_callback(struct timer_list *t)
 }
 
 
-
-static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de las direcciones de memoria, etc. Por ahora asegurar que lo llama 
+/* Probe function -> This function configure gpio, set timers and initialize necessary things */
+static int td3_probe(struct platform_device *pdev) 
 { 
     printk(KERN_INFO "td3driver: probe() llamado\n");
 
 
-    /* Mapeo los tres registros que necesito, el de GPIO, CM para controlar la func. del pin
-    y CM_PER_BASE para los timers del GPIO2 */
+    /* I map the three registers I need: the GPIO register, the CM register to control the pin function, and the CM_PER_BASE register for the GPIO2 timers.*/
     cm_base = ioremap(CM_REGISTER, CM_SIZE); 
     if(cm_base == NULL)
       {
@@ -312,24 +314,22 @@ static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de la
     if(cm_per_base == NULL)
     {
       iounmap(cm_base);
-      return -1;
+      return -ENOMEM;
     }  
 
-    // Configuracion de CLK GPIO2
+    // Config. CLK GPIO2
     iowrite32(CLK_GPIO2_CONFIG, cm_per_base + GPIO2_CLK_OFFSET); 
 
     u32 clkconfig; 
     clkconfig = ioread32(cm_per_base + GPIO2_CLK_OFFSET); 
     printk(KERN_INFO "clkonfig RLED = 0x%08x\n", clkconfig);
 
-
-
     gpio2_base = ioremap(GPIO2_REGISTER, GPIO2_SIZE); 
     if(gpio2_base == NULL)
     {
       iounmap(cm_per_base);
       iounmap(cm_base);
-      return -1;
+      return -ENOMEM;
     }  
 
     if (!(ioread32(gpio2_base + GPIO_SYSSTATUS) & 0x1)) {
@@ -337,10 +337,10 @@ static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de la
     iounmap(gpio2_base);
     iounmap(cm_per_base);
     iounmap(cm_base);
-    return -ENODEV;
+    return -ENOMEM;
     }
 
-    // Configurar E/S
+    // Config E/S
     u32 oe = ioread32(gpio2_base + GPIO_OE); 
     
     oe &= ~COL_MASK;
@@ -352,12 +352,14 @@ static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de la
     printk(KERN_INFO "OE after write = 0x%08x\n", ioread32(gpio2_base + GPIO_OE));
 
 
-    // Activar debounce 
+    // Debounce active 
     iowrite32(DEBOUNCE_ENABLE, gpio2_base + GPIO_DEBOUNCENABLE); 
 
-    // Tiempo de debounce 
+    // Debounce time  
     iowrite32(DEBOUNCE_TIME, gpio2_base + GPIO_DEBOUNCINGTIME); 
 
+
+    // Interrupts were not used at this stage.
     // // Activar IRQ en las entradas 
     // iowrite32(IRQ_ENABLE, gpio2_base + GPIO_IRQSTATUS_SET_0); 
 
@@ -373,19 +375,19 @@ static int td3_probe(struct platform_device *pdev) // Aca hay que hacer lo de la
     init_waitqueue_head(&wait_queue);
     code_ready = 0;
 
+
+    // Jiffies setup 
     timer_setup(&kbread_timer, kbread_timer_callback, 0); 
-    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(60)); 
+    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(50)); 
 
     timer_setup(&led_timer, led_timer_callback, 0);
-    timer_setup(&long_buzzer_timer, long_buzzer_timer_callback, 0);
     timer_setup(&short_buzzer_timer, short_buzzer_timer_callback, 0);
-
-
-
 
     return 0;
 }
 
+
+/* Remove for rmmod driver command */
 static int td3_remove(struct platform_device *pdev)
 {
     printk(KERN_INFO "td3driver: remove() llamado\n");
@@ -397,10 +399,6 @@ static const struct of_device_id td3_device[] = {
     {}
 };
 MODULE_DEVICE_TABLE(of, td3_device);
-
-
-
-
 
 
 static struct platform_driver td3_platform_driver = {
@@ -419,7 +417,7 @@ static int my_dev_uevent(struct device *dev, struct kobj_uevent_env *env)
 }
 
 
-
+/* Init based in example for class */
 static int td3driver_init( void )
 {
   int registration_return; 
@@ -478,12 +476,11 @@ static int td3driver_init( void )
 }
 
 
-
+/* Resource release – driver module removal protocol */
 static void td3driver_exit( void )
 {
     // Borrar lo asignado para no tener memory leak en kernel
   del_timer(&short_buzzer_timer); 
-  del_timer(&long_buzzer_timer); 
   del_timer(&led_timer); 
   del_timer(&kbread_timer); 
   iounmap(gpio2_base); 
@@ -497,20 +494,23 @@ static void td3driver_exit( void )
   printk(KERN_ALERT "Driver td3 desinstalado.\n");
 }
 
+/* Read operation - blocked until data is available */
 static ssize_t td3driver_read(struct file *filp, char __user *buf,
                               size_t count, loff_t *f_pos)
 {
-    wait_event_interruptible(wait_queue, code_ready == 1); // bloquea hasta que haya código
+    wait_event_interruptible(wait_queue, code_ready == 1); 
     printk(KERN_INFO "SE VA A MANDAR CODIGO\n");
     if(copy_to_user(buf, aux_buffer, 5)) { 
         printk(KERN_ALERT "error escritura codigo desde kb"); 
-        return -1; 
+        return -EFAULT; 
     }
     code_ready = 0;
     aux_buffer[0] = '\0';
     return 5;
 }
 
+
+/* Write operation - manage incoming commands */
 static ssize_t td3driver_write(struct file *filp, const char __user *buf,
                                size_t count, loff_t *f_pos)
 {

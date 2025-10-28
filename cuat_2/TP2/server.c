@@ -18,13 +18,17 @@
 
 
 #define EVENT_SEM_NAME "/event_sem"
-#define MAX_CONN 1 //Nro maximo de conexiones en espera
 #define SEM_NAME "/shared_sem"
 #define SHM_KEY 0x1234
 #define MAX_CODES 100
 #define MAX_LOGS 100
 static int created_shm;
 static int created_sem;
+
+typedef struct {
+    int BACKLOG;
+    int MAX_CONNECTIONS;
+} ServerConfig;
 
 
 struct arguments {
@@ -47,7 +51,7 @@ typedef struct {
 } CodeEntry;
 
 typedef struct {
-    char datetime[20]; // "YYYY-MM-DD HH:MM:SS"
+    char datetime[20]; 
     char code[5];
     int valid; // 1 válido, 0 inválido
 } LogEntry;
@@ -64,11 +68,10 @@ void Remote_Access_Control ();
 int check_code(const char *code, SharedData *shared, sem_t *sem);
 void build_page(char *html, SharedData *shared, sem_t *sem);
 void register_log(const char *code,int result);
-void cleanup();
-void cleanup_and_kill_all(void);
+void cleanup(int kill_children);
 void sigint_handler(int sig);
-void ProcesarCliente(int fd_cliente, struct sockaddr_in *pDireccionCliente,
-                     int puerto);
+void ProcesarCliente(int fd_cliente, struct sockaddr_in *pDireccionCliente, int puerto);
+int load_config(const char *filename, ServerConfig *config);
 
 SharedData *shared = NULL;
 sem_t *sem = NULL;
@@ -87,18 +90,31 @@ void sigchld_handler(int sig) {
     }
 }
 
+/* Main with ipcs creation + process fork */
 int main(int argc, char *argv[])
 {
     int fd_server, pid_kb;
+    // Server variables
     struct sockaddr_in datosServidor;
     socklen_t longDirec;
+    // Signals variables 
     struct sigaction sa;
     sa.sa_handler = sigchld_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART;
     sigaction(SIGCHLD, &sa, NULL);
+    ServerConfig config;
 
+    /* Load configuration from file */
+    if(load_config("config.ini", &config) != 0) {
+        fprintf(stderr, "Error loading configuration file\n");
+        exit(1);
+    }
 
+    printf("Configuración: BACKLOG=%d, MAX_CONNECTIONS=%d\n",
+           config.BACKLOG, config.MAX_CONNECTIONS);
+
+    /* Create shared memory for log and codes use */
     shmid = shmget(SHM_KEY, sizeof(SharedData), IPC_CREAT | IPC_EXCL | 0660);
     if (shmid < 0) {
         if (errno == EEXIST) {
@@ -112,17 +128,15 @@ int main(int argc, char *argv[])
         created_shm = 1;
     }
 
-    
     shared = (SharedData *)shmat(shmid, NULL, 0);
     if (shared == (void *)-1) {
         perror("Error mapeando memoria compartida");
         exit(1);
     }
 
-    /* Limpiar siempre */
     memset(shared, 0, sizeof(SharedData));
 
-    /* ----- Inicializar semáforo y detectar si fue creado ----- */
+    /* Create semaphore for shared memory access control */
     sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0666, 1);
     if (sem == SEM_FAILED) {
         if (errno == EEXIST) {
@@ -136,6 +150,7 @@ int main(int argc, char *argv[])
         created_sem = 1;
     }
 
+    /* Create event sem for new code entries and wakeup thread */
     event_sem = sem_open(EVENT_SEM_NAME, O_CREAT | O_EXCL, 0666, 0);
     if (event_sem == SEM_FAILED) {
         if (errno == EEXIST) {
@@ -149,10 +164,10 @@ int main(int argc, char *argv[])
             exit(1);
         }
     } else {
-        /* marcado creado? podrías llevar created_event_sem si quieres limpiar */
+        printf("Event semaphore created\n");
     }
 
-
+    /* Socket creation */
     fd_server = socket(AF_INET, SOCK_STREAM,0);
     if (fd_server == -1)
     {
@@ -161,12 +176,12 @@ int main(int argc, char *argv[])
     }
 
 
-    // Asigna el puerto indicado y una IP de la maquina
+    /* Assigning IP address and port */
     datosServidor.sin_family = AF_INET;
     datosServidor.sin_port = htons(8080);
     datosServidor.sin_addr.s_addr = htonl(INADDR_ANY);    
 
-    // Obtiene el puerto para este proceso.
+    /* Get the port for this process. */
     if( bind(fd_server, (struct sockaddr*)&datosServidor,
             sizeof(datosServidor)) == -1)
     {
@@ -175,7 +190,8 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
-      if (listen(fd_server, MAX_CONN) < 0)
+    /* Listen for incoming connections */
+    if (listen(fd_server, config.BACKLOG) < 0)
     {
         perror("Error en listen");
         close(fd_server);
@@ -183,8 +199,8 @@ int main(int argc, char *argv[])
     }
     if (setpgid(0, 0) != 0) {
     perror("setpgid");
-    // no fatal, pero conviene continuar
     }
+    /* Create the process for the driver interaction */
     pid_kb = fork(); 
     if(pid_kb < 0)
     {
@@ -197,9 +213,11 @@ int main(int argc, char *argv[])
         exit(0); 
     }
 
+    /* Signals handlers */
     signal(SIGCHLD, sigchld_handler);
     signal(SIGINT, sigint_handler);
-    // Permite atender a multiples usuarios
+
+    /* Server loop */
     while (1)
     {
         int pid, fd_cliente;
@@ -207,7 +225,7 @@ int main(int argc, char *argv[])
         longDirec = sizeof(datosCliente);
 
         // Esperar hasta que no haya hijos activos
-        while (child_count >= 1) {
+        while (child_count >= config.MAX_CONNECTIONS) {
             sleep(1);
         }
 
@@ -237,7 +255,7 @@ int main(int argc, char *argv[])
 
 
     }
-        cleanup(0); // Si llega al final normalmente
+    cleanup(0); 
     if (fd_server >= 0) {
         close(fd_server);
         fd_server = -1;
@@ -257,13 +275,15 @@ void ProcesarCliente(int fd_cliente, struct sockaddr_in *pDireccionCliente, int 
     char HTML[4096];
     int code_exist = 0; 
 
+    /* Read http request*/
     int n = read(fd_cliente, bufferComunic, sizeof(bufferComunic)-1);
     if (n <= 0) {
         close(fd_cliente);
         return;
     }
-    bufferComunic[n] = '\0'; // asegurar string
+    bufferComunic[n] = '\0'; 
 
+    /* Check if get -> send form / post -> new code */
     if (strncmp(bufferComunic, "GET", 3) == 0) {
         char html[16384];
         build_page(html, shared, sem);
@@ -284,8 +304,7 @@ void ProcesarCliente(int fd_cliente, struct sockaddr_in *pDireccionCliente, int 
         close(fd_cliente);
     }
 
-else if (strncmp(bufferComunic, "POST", 4) == 0) {
-    // Parse Content-Length
+    else if (strncmp(bufferComunic, "POST", 4) == 0) {
     char *cl = strcasestr(bufferComunic, "Content-Length:");
     int content_length = 0;
     if (cl) sscanf(cl, "Content-Length: %d", &content_length);
@@ -367,7 +386,7 @@ struct notify_arg {
     sem_t *event_sem;
 };
 
-
+/* The thread notifies the driver when a new code is add and send command with the shared fd */
 void *notification_thread(void *arg) {
     struct notify_arg *na = (struct notify_arg *)arg;
     struct arguments args;
@@ -378,20 +397,20 @@ void *notification_thread(void *arg) {
             perror("sem_wait event_sem");
             break;
         }
-        printf("[Hilo notificación] Nuevo código agregado desde la web\n");
+        printf(" Thread - Nuevo código agregado desde la web\n");
 
         args.command = CMD_ORANGE_LED;
         args.millis = 100;
         write(na->fd_driver, &args, sizeof(args));
 
         args.command = CMD_BEEP;
-        args.millis = 10;
+        args.millis = 150;
         write(na->fd_driver, &args, sizeof(args));
     }
     return NULL;
 }
 
-
+/* Interact with the driver, reading and writing. */
 void Remote_Access_Control ()
 {
     int fd_driver; 
@@ -410,12 +429,11 @@ void Remote_Access_Control ()
     na->fd_driver = fd_driver;
     na->event_sem = event_sem;
 
-    /* El proceso hijo hereda event_sem del padre (semáforo nombrado) */
     if (pthread_create(&tid, NULL, notification_thread, na) != 0) {
         perror("pthread_create notification_thread");
         free(na);
     } else {
-        pthread_detach(tid);  // no necesitamos join
+        pthread_detach(tid); 
     }
     while(1){
         int n = read(fd_driver, code, 5);
@@ -438,11 +456,11 @@ void Remote_Access_Control ()
             printf("codigo ingreso valido\n");  // boton verde
             register_log(code, 1);
             args.command = CMD_GREEN_LED;
-            args.millis = 100; // 200 ms
+            args.millis = 100; 
             write(fd_driver, &args, sizeof(args));
 
             args.command = CMD_BEEP;
-            args.millis = 10; // 100 ms
+            args.millis = 10; 
             write(fd_driver, &args, sizeof(args));
         } 
         else 
@@ -450,11 +468,11 @@ void Remote_Access_Control ()
             printf("codigo ingreso invalido\n"); // boton rojo
             register_log(code, 0);
             args.command = CMD_RED_LED;
-            args.millis = 100; // 200 ms
+            args.millis = 100; 
             write(fd_driver, &args, sizeof(args));
 
             args.command = CMD_BEEP;
-            args.millis = 10; // 100 ms
+            args.millis = 100;
             write(fd_driver, &args, sizeof(args));
         }
     }
@@ -462,6 +480,7 @@ void Remote_Access_Control ()
 
 }
 
+/* Register log entry in shared memory */
 void register_log(const char *code, int result) {
     sem_wait(sem);
 
@@ -470,7 +489,6 @@ void register_log(const char *code, int result) {
         struct tm *tm_info = localtime(&now);
         printf("Registrando log: '%s', resultado=%d\n", code, result);
         strftime(shared->logs[shared->num_logs].datetime, sizeof(shared->logs[0].datetime), "%Y-%m-%d %H:%M:%S", tm_info);
-        // Copiar los primeros 5 caracteres y asegurar '\0'
         strncpy(shared->logs[shared->num_logs].code, code, 5);
         shared->logs[shared->num_logs].code[4] = '\0';
 
@@ -481,6 +499,7 @@ void register_log(const char *code, int result) {
     sem_post(sem);
 }
 
+/* Check if the code is valid and return the result */
 int check_code(const char *code, SharedData *shared, sem_t *sem) {
     int found = 0;
     sem_wait(sem);
@@ -498,7 +517,7 @@ int check_code(const char *code, SharedData *shared, sem_t *sem) {
 
 
 
-
+/* Build html page based in index.html */
 void build_page(char *html, SharedData *shared, sem_t *sem) {
     FILE *tpl = fopen("index.html", "r");
     if (!tpl) {
@@ -535,18 +554,18 @@ void build_page(char *html, SharedData *shared, sem_t *sem) {
     fclose(tpl);
 }
 
-
+/* Kill childrens and clean */
 void sigint_handler(int sig) {
-    cleanup(1);   // mata hijos y limpia todo
+    cleanup(1);   
     _exit(0);
 }
 
-
+/* Free resources */
 void cleanup(int kill_children) {
     if (kill_children) {
         pid_t pgid = getpgrp();
         killpg(pgid, SIGTERM);
-        sleep(1);  // tiempo para que mueran los hijos
+        sleep(1);  
     }
 
 
@@ -576,4 +595,30 @@ void cleanup(int kill_children) {
     }
 
     sem_unlink(EVENT_SEM_NAME);
+}
+
+/* Read config.ini and setup the server */
+int load_config(const char *filename, ServerConfig *config) {
+    FILE *f = fopen(filename, "r");
+    if (!f) {
+        perror("No se pudo abrir el archivo de configuración");
+        return -1;
+    }
+
+    config->BACKLOG = 1;
+    config->MAX_CONNECTIONS = 1;
+
+    char key[64];
+    int value;
+    while (fscanf(f, "%63s %d", key, &value) == 2) {
+        if (strcmp(key, "BACKLOG") == 0)
+            config->BACKLOG = value;
+        else if (strcmp(key, "MAX_CONNECTIONS") == 0)
+            config->MAX_CONNECTIONS = value;
+        else
+            fprintf(stderr, "Advertencia: clave desconocida '%s'\n", key);
+    }
+
+    fclose(f);
+    return 0;
 }

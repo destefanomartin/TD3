@@ -1,0 +1,10 @@
+iptables --append FORWARD --in-interface enx04a316ac4845 -j ACCEPT
+
+iptables --append FORWARD --in-interface wlp2s0 -o enx04a316ac4845 -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+iptables --table nat --append POSTROUTING --out-interface wlp2s0 -j MASQUERADE
+
+echo 1 > /proc/sys/net/ipv4/ip_forward
+
+
+
