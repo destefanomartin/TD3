@@ -224,18 +224,18 @@ int main(int argc, char *argv[])
         struct sockaddr_in datosCliente;
         longDirec = sizeof(datosCliente);
 
-        // Esperar hasta que no haya hijos activos
+        // Wait until there are no active children
         while (child_count >= config.MAX_CONNECTIONS) {
             sleep(1);
         }
 
-        // Aceptar cliente
+        // Accept client
         for (;;) {
             fd_cliente = accept(fd_server, (struct sockaddr*)&datosCliente, &longDirec);
             if (fd_cliente >= 0) break;           
-            if (errno == EINTR) continue;         // señal interrumpió, reintentar
+            if (errno == EINTR) continue;         // signal interrupt, resubmit
             perror("accept");
-            sleep(1);                             // espera antes de volver a intentar
+            sleep(1);                             // wait before retrying
         }
         pid = fork();
         if (pid < 0)
@@ -250,7 +250,7 @@ int main(int argc, char *argv[])
             close(fd_cliente);
             exit(0);
         }
-        child_count++;   // padre incrementa
+        child_count++;   // parent increments
         close(fd_cliente);
 
 
@@ -283,7 +283,7 @@ void ProcesarCliente(int fd_cliente, struct sockaddr_in *pDireccionCliente, int 
     }
     bufferComunic[n] = '\0'; 
 
-    /* Check if get -> send form / post -> new code */
+    /* Check if get -> send form */
     if (strncmp(bufferComunic, "GET", 3) == 0) {
         char html[16384];
         build_page(html, shared, sem);
@@ -304,12 +304,13 @@ void ProcesarCliente(int fd_cliente, struct sockaddr_in *pDireccionCliente, int 
         close(fd_cliente);
     }
 
+    /* In the case of post, i can delete or create code - first i need to read the size of the body */
     else if (strncmp(bufferComunic, "POST", 4) == 0) {
     char *cl = strcasestr(bufferComunic, "Content-Length:");
     int content_length = 0;
     if (cl) sscanf(cl, "Content-Length: %d", &content_length);
 
-    // Obtener cuerpo
+    /* search the start of the body  */
     char *body = strstr(bufferComunic, "\r\n\r\n");
     if (!body) { close(fd_cliente); return; }
     body += 4;
@@ -322,6 +323,7 @@ void ProcesarCliente(int fd_cliente, struct sockaddr_in *pDireccionCliente, int 
     }
     body[body_len] = '\0';
 
+    // search for code in body 
     char codigo[5] = {0};
     sscanf(body, "codigo=%4s", codigo); // <= 4 chars
     if (strstr(bufferComunic, "POST /agregar") != NULL) {
@@ -424,6 +426,7 @@ void Remote_Access_Control ()
         exit(1); 
     }
 
+    /* Thread notification creation */
     pthread_t tid;
     struct notify_arg *na = malloc(sizeof(*na));
     na->fd_driver = fd_driver;
@@ -435,6 +438,8 @@ void Remote_Access_Control ()
     } else {
         pthread_detach(tid); 
     }
+
+    /* loop for driver reading */
     while(1){
         int n = read(fd_driver, code, 5);
         if (n < 0) {
@@ -453,7 +458,7 @@ void Remote_Access_Control ()
 
         if (check_code(code, shared, sem))        
         {
-            printf("codigo ingreso valido\n");  // boton verde
+            printf("codigo ingreso valido\n");  
             register_log(code, 1);
             args.command = CMD_GREEN_LED;
             args.millis = 100; 
@@ -465,7 +470,7 @@ void Remote_Access_Control ()
         } 
         else 
         {
-            printf("codigo ingreso invalido\n"); // boton rojo
+            printf("codigo ingreso invalido\n"); 
             register_log(code, 0);
             args.command = CMD_RED_LED;
             args.millis = 100; 
@@ -504,7 +509,6 @@ int check_code(const char *code, SharedData *shared, sem_t *sem) {
     int found = 0;
     sem_wait(sem);
     for (int i = 0; i < shared->num_codes; i++) {
-        // Comparar siempre los primeros 4 caracteres
         if (strncmp(shared->codes[i].code, code, 4) == 0) {
             printf("Código encontrado: %s\n", code);
             found = 1;
@@ -567,7 +571,6 @@ void cleanup(int kill_children) {
         killpg(pgid, SIGTERM);
         sleep(1);  
     }
-
 
     if (shared != NULL) {
         shmdt(shared);
