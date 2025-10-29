@@ -125,16 +125,9 @@ static const u32 col_pins[3] = { (1 << 15) , (1 << 14), (1 << 8) };
 
 static DECLARE_WAIT_QUEUE_HEAD(wait_queue); 
 static int code_ready = 0; 
-static int count_key_col0 = 0;
-static int count_key_col1 = 0;
-static int count_key_col2 = 0;
-static char last_key_col0 = '\0'; 
-static char last_key_col1 = '\0'; 
-static char last_key_col2 = '\0';
-static int col_number = 0; 
-static int key_active_col0 = 0; 
-static int key_active_col1 = 0; 
-static int key_active_col2 = 0; 
+static int key_pressed = 0;                    /* check for key press */
+static unsigned long last_key_time = 0;        
+#define DEBOUNCE_SW_MS 150                     /* min time between two press keys */
 
 static int col = 0; 
 // Jiffies 
@@ -202,8 +195,7 @@ static char kb_read(void)
           printk(KERN_INFO "columna %d y fila %d\n", col, row); 
           key = keyboard_mapping[row-9][col]; 
           iowrite32(1u << col_pins[col], gpio2_base + GPIO_SETDATAOUT);
-          col++; 
-          if(col == 3) col = 0;  
+          col = 0; 
           return key;  
         }
     }
@@ -252,76 +244,23 @@ static void process_key(char key) {
 static void kbread_timer_callback(struct timer_list *t)
 {
     char key = kb_read(); 
-    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(5));
+    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(50));
 
+    if (key != 0 && !key_pressed) {
+        unsigned long now = jiffies;
 
-    switch(col_number) {
-    case 0:
-        if (key == '\0') {
-            count_key_col0 = 0; 
-            key_active_col0 = 0;  
-        } 
-        else if (key == last_key_col0 && !key_active_col0) {
-            count_key_col0++; 
-            printk(KERN_INFO "col0 key %c count %d\n", key, count_key_col0);
-            if (count_key_col0 >= 3) {
-                process_key(key);
-                key_active_col0 = 1;  
-            }
-        } 
-        else if (key != last_key_col0) {
-            printk(KERN_INFO "Key distinta"); 
-            count_key_col0 = 0;
-            key_active_col0 = 0;  
+        // Compare kernels times 
+        if (time_after(now, last_key_time + msecs_to_jiffies(DEBOUNCE_SW_MS))) { 
+            process_key(key);
+            key_pressed = 1;
+            last_key_time = now;
         }
-        last_key_col0 = key; 
-        col_number++;
-        break;
 
-    case 1:
-        if (key == '\0') {
-            count_key_col1 = 0; 
-            key_active_col1 = 0;
-        } 
-        else if (key == last_key_col1 && !key_active_col1) {
-            count_key_col1++; 
-            if (count_key_col1 >= 3) {
-                process_key(key);
-                key_active_col1 = 1;
-            }
-        } 
-        else if (key != last_key_col1) {
-            count_key_col1 = 0;
-            key_active_col1 = 0;
-        }
-        last_key_col1 = key;
-        col_number++;
-        break;
-
-    case 2:
-        if (key == '\0') {
-            count_key_col2 = 0; 
-            key_active_col2 = 0;
-        } 
-        else if (key == last_key_col2 && !key_active_col2) {
-            count_key_col2++; 
-            if (count_key_col2 >= 3) {
-                process_key(key);
-                key_active_col2 = 1;
-            }
-        } 
-        else if (key != last_key_col2) {
-            count_key_col2 = 0;
-            key_active_col2 = 0;
-        }
-        last_key_col2 = key;
-        col_number = 0;
-        break;
+    } else if (key == 0) { // no key pressed
+        key_pressed = 0;
     }
 
 }
-
-
 
 /* JIffies callback for led -> activate from new code / invalid or valid code */
 static void led_timer_callback(struct timer_list *t)
@@ -439,7 +378,7 @@ static int td3_probe(struct platform_device *pdev)
 
     // Jiffies setup 
     timer_setup(&kbread_timer, kbread_timer_callback, 0); 
-    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(5)); 
+    mod_timer(&kbread_timer, jiffies + msecs_to_jiffies(50)); 
 
     timer_setup(&led_timer, led_timer_callback, 0);
     timer_setup(&short_buzzer_timer, short_buzzer_timer_callback, 0);
