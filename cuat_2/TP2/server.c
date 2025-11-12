@@ -22,6 +22,9 @@
 #define SHM_KEY 0x1234
 #define MAX_CODES 100
 #define MAX_LOGS 100
+#define SIZE_BUFFER 4096
+#define SIZE_HTML 16384    
+#define SIZE_HEADER 512
 static int created_shm;
 static int created_sem;
 
@@ -53,7 +56,7 @@ typedef struct {
 typedef struct {
     char datetime[20]; 
     char code[5];
-    int valid; // 1 válido, 0 inválido
+    int valid; 
 } LogEntry;
 
 typedef struct {
@@ -107,7 +110,7 @@ int main(int argc, char *argv[])
 
     /* Load configuration from file */
     if(load_config("config.ini", &config) != 0) {
-        fprintf(stderr, "Error loading configuration file\n");
+        fprintf(stderr, "Error cargando archivo de configuracion\n");
         exit(1);
     }
 
@@ -268,11 +271,10 @@ int main(int argc, char *argv[])
 
 void ProcesarCliente(int fd_cliente, struct sockaddr_in *pDireccionCliente, int puerto)
 {
-    char bufferComunic[4096];
-    char ipAddr[20];
-    int Port;
-    int indiceEntrada;
-    char HTML[4096];
+    char bufferComunic[SIZE_BUFFER];
+    char html[SIZE_HTML];
+    char header[SIZE_HEADER];
+
     int code_exist = 0; 
 
     /* Read http request*/
@@ -285,10 +287,8 @@ void ProcesarCliente(int fd_cliente, struct sockaddr_in *pDireccionCliente, int 
 
     /* Check if get -> send form */
     if (strncmp(bufferComunic, "GET", 3) == 0) {
-        char html[16384];
         build_page(html, shared, sem);
 
-        char header[512];
         sprintf(header,
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: text/html; charset=UTF-8\r\n"
@@ -360,10 +360,8 @@ void ProcesarCliente(int fd_cliente, struct sockaddr_in *pDireccionCliente, int 
         sem_post(sem);
     }
 
-    char html[16384];
     build_page(html, shared, sem);
 
-    char header[256];
     sprintf(header,
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: text/html; charset=UTF-8\r\n"

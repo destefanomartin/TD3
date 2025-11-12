@@ -451,6 +451,12 @@ static int td3_probe(struct platform_device *pdev)
 /* Remove for rmmod driver command */
 static int td3_remove(struct platform_device *pdev)
 {
+    del_timer(&short_buzzer_timer); 
+    del_timer(&led_timer); 
+    del_timer(&kbread_timer); 
+    iounmap(gpio2_base); 
+    iounmap(cm_per_base);
+    iounmap(cm_base); 
     printk(KERN_INFO "td3driver: remove() llamado\n");
     return 0;
 }
@@ -541,12 +547,6 @@ static int td3driver_init( void )
 static void td3driver_exit( void )
 {
     // Borrar lo asignado para no tener memory leak en kernel
-  del_timer(&short_buzzer_timer); 
-  del_timer(&led_timer); 
-  del_timer(&kbread_timer); 
-  iounmap(gpio2_base); 
-  iounmap(cm_per_base);
-  iounmap(cm_base); 
   platform_driver_unregister(&td3_platform_driver);
   cdev_del(&td3driver_cdev);
   device_destroy( cl, dev );
@@ -567,7 +567,7 @@ static ssize_t td3driver_read(struct file *filp, char __user *buf,
     }
     code_ready = 0;
     aux_buffer[0] = '\0';
-    return 5;
+    return 5; // TO DO: count y verificar count 
 }
 
 
